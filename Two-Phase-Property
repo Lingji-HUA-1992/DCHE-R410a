@@ -1,0 +1,844 @@
+/********************************************************预编译********************************************************/
+
+/**调用库**/
+#include <iostream>
+#include <cmath>
+#include <fstream>
+
+/**宏定义**/
+#define pi 3.14159265
+
+using namespace std;
+/*******************************************************函数声明*******************************************************/
+
+static double P0 = 4902000;
+
+/**translate T into v**/
+double CalculateV(double T, double v0);
+/**translate z into u**/
+double CalculateU(double z, double z0, int denominator = 1000, double index = 1.0, double u0 = 0);
+/**calculate u(v) from the v(u)**/
+int CalculateSU(double *p1, double *p2, double *p3, double v, double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8);
+int CalculateSV(double *p1, double *p2, double *p3, double u, double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8);
+/**translate u or v into z**/
+double CalculateZ(double u, double u0, int denominator = 1000, double index = 1.0, double z0 = 0);
+double Power1_3(double num);
+
+//double SaturatedLHT(double Tsat);
+//double SaturatedGHT(double Tsat);
+//double SaturatedLTP(double Psat);
+//double SaturatedGTP(double Psat);
+
+/*******************************************************被调函数*******************************************************/
+double SaturatedLPT(double Tsat){
+
+    double v;                                                             /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double P0;
+    double p1, p2, p3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double pl;
+    Tsat = Tsat + 273.15;
+    if(213.15 <= Tsat && Tsat <=342.15){
+        T0 = 213.15;
+        a1 = 0.963283158430670e-1, a2 = 0.471902490267178e-1, a3 = -0.458054503818341e-3, a4 = -0.999105440832941e2;
+        a5 = -0.722494790200623e1, a6 = -0.574583476714839e-1, a7 = 0.105558085163695e4, a8 = -0.377978816249515e1;
+        P0 = 64.2435;
+    }
+    else{
+        if(342.15 < Tsat && Tsat<= 344.51){
+            T0 = 342.15;
+            a1 = -0.301475868916664, a2 = 0.302944630139300e-1, a3 = -0.101468665251770e-2, a4 = 0.186294009540186e-2;
+            a5 = -0.373091446381272e-3, a6 = 0.186788768174818e-4, a7 = 0.298228774167932e-6, a8 = -0.296848290090830e-7;
+            P0 = 4665.15;
+        }
+        else {
+            cout<<"Tsat out of range of LPT!!"<<endl;
+            return 0;
+        }
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    p1 = CalculateZ(u1, P0), p2 = CalculateZ(u2, P0), p3 = CalculateZ(u3, P0);
+    if(213.15 <= Tsat && Tsat <=342.15 && root == 3)pl = p2;
+    else{
+        if(342.15 < Tsat && Tsat<= 344.51)pl = p1;
+        else{
+            cout<<"Something wrong within the code LPT!!"<<endl;
+            return 0;
+        }
+    }
+    return pl;
+}
+
+double SaturatedGPT(double Tsat){
+
+    double v;                                                             /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double P0;
+    double p1, p2, p3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double pg;
+    Tsat = Tsat + 273.15;
+    if(213.15 <= Tsat && Tsat <=341.15){
+        T0 = 213.15;
+        a1 = 0.100728245329352, a2 = 0.455863083100631e-1, a3 = -0.441270307815364e-3, a4 = -0.990045948017703e2;
+        a5 = -0.690916218513525e1, a6 = -0.551170445794678e-1, a7 = 0.101408444445610e4, a8 = -0.361893557238858e1;
+        P0 = 63.9623;
+    }
+    else{
+        if(341.15 < Tsat && Tsat<= 344.51){
+            T0 = 341.15;
+            a1 = -0.302390494957135, a2 = 0.303710107938267e-1, a3 = -0.101329671685030e-2, a4 = 0.106071561894656;
+            a5 = -0.209092908059657e-1, a6 = 0.103040046669427e-2, a7 = 0.760426921591874e-5, a8 = -0.746341272050195e-6;
+            P0 = 4561.58;
+        }
+        else {
+            cout<<"Tsat out of range of GPT!!"<<endl;
+            return 0;
+        }
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    p1 = CalculateZ(u1, P0), p2 = CalculateZ(u2, P0), p3 = CalculateZ(u3, P0);
+    if(213.15 <= Tsat && Tsat <=341.15 && root == 3)pg = p2;
+    else{
+        if(341.15 < Tsat && Tsat<= 344.51 && root == 3)pg = p1;
+        else{
+            cout<<"Something wrong within the code GPT!!"<<endl;
+            return 0;
+        }
+    }
+    return pg;
+}
+
+double SaturatedLHT(double Tsat){
+
+    double v;                                                              /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double H0;
+    double h1, h2, h3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double hl;
+    Tsat = Tsat + 273.15;
+    if(213.15 <= Tsat && Tsat <=313.15){
+        T0 = 203.15;
+        a1 = -0.279433916436287e-1, a2 = 0.253464826062912e-3, a3 = -0.775126929171533e-6, a4 = -0.338959282988452e1;
+        a5 = 0.881754859967502e-1, a6 = -0.572660888311905e-3, a7 = 0.114442790021096e-1, a8 = -0.154441755267866e-3;
+        H0 = 101.105;
+    }
+    else{
+        if(313.15 < Tsat && Tsat<= 344.15){
+            T0 = 313.15;
+            a1 = -0.224638563438672e-1, a2 = -0.576613954816708e-4, a3 = 0.254505257551170e-5, a4 = -0.165755749182105e1;
+            a5 = 0.599495987942830e-1, a6 = -0.541718342610071e-3, a7 = -0.107589566252749e-2, a8 = 0.199920826265626e-4;
+            H0 = 266.335;
+        }
+         //else cout<<"Tsat out of range of LHT!!"<<endl;
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    h1 = CalculateZ(u1, H0, 100), h2 = CalculateZ(u2, H0, 100), h3 = CalculateZ(u3, H0, 100);
+    if(213.15 <= Tsat && Tsat <=313.15 && root == 3)hl = h3;
+    else{
+        if(313.15 < Tsat && Tsat<= 344.15 && root == 3)hl = h3;
+        else{
+            //cout<<"Something wrong within the code LHT!!"<<endl;
+            return 0;
+        }
+    }
+    return hl;
+}
+
+double SaturatedGHT(double Tsat){
+
+    double v;                                                              /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double H0;
+    double h1, h2, h3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double hg;
+    Tsat = Tsat + 273.15;
+    if(213.15 <= Tsat && Tsat <=301.15){
+        T0 = 183.15;
+        a1 = -0.636998362061793e-1, a2 = 0.143079428273418e-2, a3 = -0.105768352249157e-4, a4 = 0.675741816516067e1;
+        a5 = -0.208759104620742, a6 = 0.161201886347066e-2, a7 = 0.343612152483847e-1, a8 = -0.516699675391844e-3;
+        H0 = 19.434;
+    }
+    else{
+        if(301.15 < Tsat && Tsat<= 344.15){
+            T0 = 301.15;
+            a1 = -0.762952246592616e-1, a2 = 0.120711580610003e-2, a3 = -0.276360717737990e-5, a4 = 0.589124488045768e1;
+            a5 = -0.162137389649504e-1, a6 = 0.343987811026000e-5, a7 = -0.297034868410725e-1, a8 = 0.102691123598763e-4;
+            H0 = 20.647;
+        }
+         //else cout<<"Tsat out of range of GHT!!"<<endl;
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    h1 = CalculateZ(u1, H0, 1, 2), h2 = CalculateZ(u2, H0, 1, 2), h3 = CalculateZ(u3, H0, 1, 2);
+    if(213.15 <= Tsat && Tsat <=301.15 && root == 3)hg = h3;
+    else{
+        if(301.15 < Tsat && Tsat<= 344.15 && root == 3)hg = h3;
+        else{
+            //cout<<"Something wrong within the code GHT!!"<<endl;
+            return 0;
+        }
+    }
+    return hg;
+}
+
+double SaturatedLRouT(double Tsat){
+    double v;                                                              /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double Rou0;
+    double rou1, rou2, rou3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double roul;
+    Tsat = Tsat + 273.15;
+    if(213.15 <= Tsat && Tsat <=313.15){
+        T0 = 203.15;
+        a1 = -0.146864333199349e-1, a2 = 0.752922167975190e-4, a3 = -0.112551622471903e-6, a4 = 0.603138352858119;
+        a5 = -0.632330048147473e-2, a6 = 0.135144755960103e-4, a7 = 0.143772919957040e-1, a8 = -0.432381998427309e-4;
+        Rou0 = 1406.71;
+    }
+    else{
+        if(313.15 < Tsat && Tsat<= 344.15){
+            T0 = 313.15;
+            a1 = 0.113544903284091e-1, a2 = -0.172145113451118e-3, a3 = 0.428073516106360e-6, a4 = -0.143406540925043e1;
+            a5 = 0.171638226966636e-1, a6 = -0.512400923809969e-4, a7 = -0.245391985758299e-2, a8 = 0.152184057677522e-4;
+            Rou0 = 975.331;
+        }
+         //else cout<<"Tsat out of range of LRouT!!"<<endl;
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    rou1 = CalculateZ(u1, Rou0, -1000), rou2 = CalculateZ(u2, Rou0, -1000), rou3 = CalculateZ(u3, Rou0, -1000);
+    if(213.15 <= Tsat && Tsat <=313.15 && root == 3)roul = rou3;
+    else{
+        if(313.15 < Tsat && Tsat<= 344.15 && root == 3)roul = rou3;
+        else{
+            //cout<<"Something wrong within the code LRouT!!"<<endl;
+            return 0;
+        }
+    }
+    return roul;
+}
+
+double SaturatedGRouT(double Tsat){
+
+    double v;                                                              /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double Rou0;
+    double rou1, rou2, rou3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double roug;
+    Tsat = Tsat + 273.15;
+    if(213.15 <= Tsat && Tsat <=305.15){
+        T0 = 213.15;
+        a1 = -0.137108386226903, a2 = 0.134834955643387e-1, a3 = -0.500312137187735e-3, a4 = -0.210045654913782e2;
+        a5 = 0.210564791360327e1, a6 = -0.424996139437599e-1, a7 = -0.275550397712280e2, a8 = 0.118688315903295e1;
+        Rou0 = 1.64597;
+    }
+    else{
+        if(305.15 < Tsat && Tsat<= 344.15){
+            T0 = 305.15;
+            a1 = 0.307363701501987, a2 = -0.419044737499363e-1, a3 = 0.282658994254809e-2, a4 = -0.346946084466831e2;
+            a5 = 0.445336962977282e1, a6 = 0.276989795097752e-1, a7 = -0.804571484138208, a8 = 0.108002956585641;
+            Rou0 = 9.0137;
+        }
+         //else cout<<"Tsat out of range of GRouT!!"<<endl;
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    rou1 = CalculateZ(u1, Rou0, 1, 2), rou2 = CalculateZ(u2, Rou0, 1, 2), rou3 = CalculateZ(u3, Rou0, 1, 2);
+    if(213.15 <= Tsat && Tsat <=305.15 && root == 3)roug = rou3;
+    else{
+        if(305.15 < Tsat && Tsat<= 344.15 && root == 3)roug = rou3;
+        else{
+            //cout<<"Something wrong within the code GRouT!!"<<endl;
+            return 0;
+        }
+    }
+    return roug;
+}
+
+double SaturatedLCpT(double Tsat){
+
+    double v;                                                              /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double Cp0;
+    double cp1, cp2, cp3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double cpl;
+    Tsat = Tsat + 273.15;
+    if(213.15 <= Tsat && Tsat <=314.15){
+        T0 = 213.15;
+        a1 = 0.138132587630356e-2, a2 = 0.244634465506346e-5, a3 = -0.247675963981764e-8, a4 = -0.793354672452306;
+        a5 = 0.822058972069517e-3, a6 = -0.131120935056391e-6, a7 = -0.998741406808467e-2, a8 = 0.341086100904082e-5;
+        Cp0 = 0.857815;
+    }
+    else{
+        if(314.15 < Tsat && Tsat<= 343.15){
+            T0 = 314.15;
+            a1 = 0.859175945890001e-1, a2 = 0.761865193758725e-3, a3 = -0.110275165980995e-5, a4 = -0.418066837227229e1;
+            a5 = -0.485115415631895e-2, a6 = 0.956262106811161e-4, a7 = -0.245920498378918e-2, a8 = 0.104433922783908e-4;
+            Cp0 = 0.714013;
+        }
+         else cout<<"Tsat out of range of LCpT!!"<<endl;
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    cp1 = CalculateZ(u1, Cp0, -1, -2), cp2 = CalculateZ(u2, Cp0, -1, -2), cp3 = CalculateZ(u3, Cp0, -1, -2);
+    if(213.15 <= Tsat && Tsat <=314.15 && root == 3)cpl = cp3;
+    else{
+        if(314.15 < Tsat && Tsat<= 343.15 && root == 3)cpl = cp3;
+        else{
+            cout<<"Something wrong within the code LCpT!!"<<endl;
+            return 0;
+        }
+    }
+    return cpl;
+}
+
+double SaturatedGCpT(double Tsat){
+
+    double v;                                                              /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double Cp0;
+    double cp1, cp2, cp3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double cpg;
+    Tsat = Tsat + 273.15;
+    if(Tsat>= 334.15)Tsat = 334.15;
+    if(213.15 <= Tsat && Tsat <=332.19){
+        T0 = 213.15;
+        a1 = 0.136318901260275, a2 = -0.353245564639442e-3, a3 = -0.903466135894580e-7, a4 = -0.212570923215728e2;
+        a5 = 0.102548053809567, a6 = -0.977694196778534e-4, a7 = -0.218284705961971e1, a8 = 0.534362070665097e-2;
+        Cp0 = 0.875967;
+    }
+    else{
+        if(332.19 < Tsat && Tsat<= 344.15){
+            T0 = 332.15;
+            a1 = -0.107239107757931e3, a2 = -0.230109613164584e2, a3 = 0.598534373419328e-1, a4 = 0.131817196269212e4;
+            a5 = 0.279755418306573e3, a6 = -0.229395175507211e2, a7 = -0.120445117747747e2, a8 = 0.789181930912200;
+            Cp0 = 1.91450;
+        }
+         else cout<<"Tsat out of range of GCpT!!"<<Tsat<<endl;
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    cp1 = CalculateZ(u1, Cp0, 1, 2), cp2 = CalculateZ(u2, Cp0, 1, 2), cp3 = CalculateZ(u3, Cp0, 1, 2);
+    if(213.15 <= Tsat && Tsat <=332.19 && root == 3)cpg = cp3;
+    else{
+        if(332.19 < Tsat && Tsat<= 344.15 && root == 3)cpg = cp1;
+        else{
+            cout<<"Something wrong within the code GCpT!!"<<endl;
+            return 0;
+        }
+    }
+    return cpg;
+}
+
+
+double SaturatedLST(double Tsat){
+
+    double v;                                                              /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double S0;
+    double s1, s2, s3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double sl;
+    Tsat = Tsat + 273.15;
+    if(213.15 <= Tsat && Tsat <294.15){
+        T0 = 203.15;
+        a1 = -0.218095238118363e-1, a2 = 0.144576598326796e-3, a3 = -0.300789817813654e-6, a4 = -0.687539553242572;
+        a5 = 0.847542194130727e-2, a6 = -0.259325217876212e-4, a7 = 0.209825783570710e-2, a8 = -0.139321502203517e-4;
+        S0 = 0.585331;
+    }
+    else{
+        if(294.15 <= Tsat && Tsat<= 344.15){
+            T0 = 294.15;
+            a1 = -0.170027046700299e-2, a2 = -0.653975685978126e-4, a3 = 0.245177573648400e-6, a4 = -0.939715308188751;
+            a5 = 0.101906443896908e-1, a6 = -0.276241945107368e-4, a7 = 0.190365320239071e-4, a8 = -0.104351636931458e-6;
+            S0 = 1.11485;
+        }
+         else cout<<"Tsat out of range of LST!!"<<endl;
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    s1 = CalculateZ(u1, S0, 1), s2 = CalculateZ(u2, S0, 1), s3 = CalculateZ(u3, S0, 1);
+    if(213.15 <= Tsat && Tsat <=294.15 && root == 3)sl = s3;
+    else{
+        if(294.15 < Tsat && Tsat<= 344.15)sl = s3;
+        else{
+            cout<<"Something wrong within the code LST!!"<<endl;
+            return 0;
+        }
+    }
+    return sl;
+}
+
+double SaturatedGST(double Tsat){
+
+    double v;                                                              /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double S0;
+    double s1, s2, s3;
+    int root;
+    //double root;
+    double u1, u2, u3;
+    double sg;
+    Tsat = Tsat + 273.15;
+    if(213.15 <= Tsat && Tsat <294.15){
+        T0 = 203.15;
+        a1 = -0.157214757716132e-1, a2 = 0.398156589954980e-4, a3 = -0.204883067843957e-7, a4 = -0.947649898467256;
+        a5 = 0.624916811863898e-2, a6 = -0.914515185897822e-5, a7 = 0.109664101309898e-1, a8 = -0.462942784711312e-4;
+        S0 = 2.00376;
+    }
+    else{
+        if(294.15 <= Tsat && Tsat<= 344.15){
+            T0 = 294.15;
+            a1 = 0.692259557478436e-2, a2 = -0.257320464566174e-4, a3 = 0.179618322460138e-7, a4 = -0.934858973277619;
+            a5 = 0.340242532727529e-2, a6 = -0.307430205563827e-5, a7 = 0.148505881681100e-3, a8 = -0.291996644515219e-6;
+            S0 = 1.76996;
+        }
+         else cout<<"Tsat out of range of GST!!"<<endl;
+    }
+    v = CalculateV(Tsat,T0);                                              /**计算温度折合量**/
+    root = CalculateSU(&u1,&u2,&u3,v,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    s1 = CalculateZ(u1, S0, -1), s2 = CalculateZ(u2, S0, -1), s3 = CalculateZ(u3, S0, -1);
+    if(213.15 <= Tsat && Tsat <=294.15 && root == 3)sg = s3;
+    else{
+        if(294.15 < Tsat && Tsat<= 344.15 && root == 3)sg = s3;
+        else{
+            cout<<"Something wrong within the code GST!!"<<endl;
+            return 0;
+        }
+    }
+    return sg;
+}
+
+
+
+double SaturatedLTP(double Psat){
+
+    double u;                                                             /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double P0;
+    double T1, T2, T3;
+    int root;
+    //double root;
+    double v1, v2, v3;
+    Psat = Psat / 1000;
+
+    if(64.2435 <= Psat && Psat <= 4665.15){
+        P0 = 64.2435;
+        a1 = 0.963283158430670e-1, a2 = 0.471902490267178e-1, a3 = -0.458054503818341e-3, a4 = -0.999105440832941e2;
+        a5 = -0.722494790200623e1, a6 = -0.574583476714839e-1, a7 = 0.105558085163695e4, a8 = -0.377978816249515e1;
+        T0 = 213.15;
+    }
+    else{
+        if(4665.15 < Psat && Psat<= 4902.60){
+            P0 = 4665.15;
+            a1 = -0.301475868916664, a2 = 0.302944630139300e-1, a3 = -0.101468665251770e-2, a4 = 0.186294009540186e-2;
+            a5 = -0.373091446381272e-3, a6 = 0.186788768174818e-4, a7 = 0.298228774167932e-6, a8 = -0.296848290090830e-7;
+            T0 = 342.15;
+        }
+        else {
+            //cout<<"Psat out of range of LTP!!"<<endl;
+            return 0;
+        }
+    }
+    u = CalculateU(Psat,P0,1000);                                              /**计算温度折合量**/
+    root = CalculateSV(&v1,&v2,&v3,u,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    T1 = CalculateZ(v1, T0, 1), T2 = CalculateZ(v2, T0, 1), T3 = CalculateZ(v3, T0, 1);
+    if(64.2435 <= Psat && Psat <= 4665.15){
+        if(root != 1){
+            //cout<<"Something wrong within the code GTP!!"<<endl;
+            return 0;
+        }
+        else return T1;
+    }
+    else return T2;
+}
+
+double SaturatedGTP(double Psat){
+
+    double u;                                                             /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double P0;
+    double T1, T2, T3;
+    int root;
+    //double root;
+    double v1, v2, v3;
+    Psat = Psat / 1000;
+
+    if(63.9623 <= Psat && Psat <= 4561.58){
+        P0 = 63.9623;
+        a1 = 0.100728245329352, a2 = 0.455863083100631e-1, a3 = -0.441270307815364e-3, a4 = -0.990045948017703e2;
+        a5 = -0.690916218513525e1, a6 = -0.551170445794678e-1, a7 = 0.101408444445610e4, a8 = -0.361893557238858e1;
+        T0 = 213.15;
+    }
+    else{
+        if(4561.58 < Psat && Psat<= 4902.60){
+            P0 = 4561.58;
+            a1 = -0.302390494957135, a2 = 0.303710107938267e-1, a3 = -0.101329671685030e-2, a4 = 0.106071561894656;
+            a5 = -0.209092908059657e-1, a6 = 0.103040046669427e-2, a7 = 0.760426921591874e-5, a8 = -0.746341272050195e-6;
+            T0 = 341.15;
+        }
+        else {
+            //cout<<"Psat out of range of GTP!!"<<endl;
+            return 0;
+        }
+    }
+    u = CalculateU(Psat,P0,1000);                                              /**计算温度折合量**/
+    root = CalculateSV(&v1,&v2,&v3,u,a1,a2,a3,a4,a5,a6,a7,a8);            /**计算压力折合量**/
+    T1 = CalculateZ(v1, T0, 1), T2 = CalculateZ(v2, T0, 1), T3 = CalculateZ(v3, T0, 1);
+    if(63.9623 <= Psat && Psat <= 4561.58){
+        if(root != 1){
+            //cout<<"Something wrong within the code GTP!!"<<endl;
+            return 0;
+        }
+        else return T1;
+    }
+    else return T2;
+}
+
+double SaturatedLTH(double hL){
+
+    double u;                                                             /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double H0;
+    double T1, T2, T3;
+    int root;
+    //double root;
+    double v1, v2, v3;
+    hL = hL / 1000;
+    if(101.105 <= hL && hL <= 266.335){
+        H0 = 101.105;
+        a1 = -0.279433916436287e-1, a2 = 0.253464826062912e-3, a3 = -0.775126929171533e-6, a4 = -0.338959282988452e1;
+        a5 = 0.881754859967502e-1, a6 = -0.572660888311905e-3, a7 = 0.114442790021096e-1, a8 = -0.154441755267866e-3;
+        T0 = 203.15;
+    }
+    else{
+        if(266.335 <= hL && hL <= 355.330){
+            H0 = 266.335;
+            a1 = -0.224638563438672e-1, a2 = -0.576613954816708e-4, a3 = 0.254505257551170e-5, a4 = -0.165755749182105e1;
+            a5 = 0.599495987942830e-1, a6 = -0.541718342610071e-3, a7 = -0.107589566252749e-2, a8 = 0.199920826265626e-4;
+            T0 = 313.15;
+        }
+        else {
+            cout<<"HLsat out of range of LTH!!"<<endl;
+            return 0;
+        }
+    }
+    u = CalculateU(hL,H0,100);                                              /**计算温度折合量**/
+    root = CalculateSV(&v1,&v2,&v3,u,a1,a2,a3,a4,a5,a6,a7,a8);              /**计算压力折合量**/
+    T1 = CalculateZ(v1, T0, 1), T2 = CalculateZ(v2, T0, 1), T3 = CalculateZ(v3, T0, 1);
+    if(root != 3){
+        cout<<"Something wrong within the code LTH!!"<<endl;
+        return 0;
+    }
+    if(101.105 <= hL && hL <= 266.335)return T3;
+    else return T2;
+}
+
+
+double SaturatedLTS(double sL){
+
+    double u;                                                             /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double S0;
+    double T1, T2, T3;
+    int root;
+    //double root;
+    double v1, v2, v3;
+
+    if(0.65036 <= sL && sL < 1.11485){
+        T0 = 203.15;
+        a1 = -0.218095238118363e-1, a2 = 0.144576598326796e-3, a3 = -0.300789817813654e-6, a4 = -0.687539553242572;
+        a5 = 0.847542194130727e-2, a6 = -0.259325217876212e-4, a7 = 0.209825783570710e-2, a8 = -0.139321502203517e-4;
+        S0 = 0.585331;
+    }
+    else{
+        if(sL >= 1.11485 && sL <= 1.47987){
+            T0 = 294.15;
+            a1 = -0.170027046700299e-2, a2 = -0.653975685978126e-4, a3 = 0.245177573648400e-6, a4 = -0.939715308188751;
+            a5 = 0.101906443896908e-1, a6 = -0.276241945107368e-4, a7 = 0.190365320239071e-4, a8 = -0.104351636931458e-6;
+            S0 = 1.11485;
+        }
+         else {
+            cout<<"sL out of range of LTS!!"<<endl;
+            return 0;
+         }
+    }
+    u = CalculateU(sL,S0,1);                                              /**计算温度折合量**/
+    root = CalculateSV(&v1,&v2,&v3,u,a1,a2,a3,a4,a5,a6,a7,a8);              /**计算压力折合量**/
+    T1 = CalculateZ(v1, T0, 1), T2 = CalculateZ(v2, T0, 1), T3 = CalculateZ(v3, T0, 1);
+    if(root != 3){
+        cout<<"Something wrong within the code LTS!!"<<endl;
+        return 0;
+    }
+    if(0.65036 <= sL && sL < 1.11485)return T3;
+    else return T2;
+}
+
+double SaturatedGTS(double sG){
+
+    double u;                                                             /**温度折合量**/
+    double T0, a1, a2, a3, a4, a5, a6, a7, a8;
+    double S0;
+    double T1, T2, T3;
+    int root;
+    //double root;
+    double v1, v2, v3;
+
+    if(1.76996 <= sG && sG < 2.00376){
+        T0 = 203.15;
+        a1 = -0.157214757716132e-1, a2 = 0.398156589954980e-4, a3 = -0.204883067843957e-7, a4 = -0.947649898467256;
+        a5 = 0.624916811863898e-2, a6 = -0.914515185897822e-5, a7 = 0.109664101309898e-1, a8 = -0.462942784711312e-4;
+        S0 = 2.00376;
+    }
+    else{
+        if(1.54931 <= sG && sG <= 1.76996){
+            T0 = 294.15;
+            a1 = 0.692259557478436e-2, a2 = -0.257320464566174e-4, a3 = 0.179618322460138e-7, a4 = -0.934858973277619;
+            a5 = 0.340242532727529e-2, a6 = -0.307430205563827e-5, a7 = 0.148505881681100e-3, a8 = -0.291996644515219e-6;
+            S0 = 1.76996;
+        }
+         else {
+            cout<<"sL out of range of GTS!!"<<endl;
+            return 0;
+         }
+    }
+
+    u = CalculateU(sG,S0,-1);                                              /**计算温度折合量**/
+    root = CalculateSV(&v1,&v2,&v3,u,a1,a2,a3,a4,a5,a6,a7,a8);              /**计算压力折合量**/
+    T1 = CalculateZ(v1, T0, 1), T2 = CalculateZ(v2, T0, 1), T3 = CalculateZ(v3, T0, 1);
+    if(root != 3){
+        cout<<"Something wrong within the code GTS!!"<<endl;
+        return 0;
+    }
+    if(1.76996 <= sG && sG <= 2.00376)return T3;
+    else return T2;
+}
+
+/***************************************************************************************************************************************************/
+
+double TwoPhaseHX(double x, double Psat){
+    double pr;
+    double TL, TG, hL, hG;
+    double a1, a2, a3, a4, a5, a6, a7, a8;
+    double A;
+    double u, h;
+    TL = SaturatedLTP(Psat);
+    TG = SaturatedGTP(Psat);
+    hL = SaturatedLHT(TL - 273.15);
+    hG = SaturatedGHT(TG - 273.15);
+    pr = Psat / P0;
+
+    a1 = 0.285762691170231e-10, a2 = 0.102926100709812e-7, a3 = -0.248692308039487e-5, a4 = 0.202402830194857e-3;
+    a5 = -0.139571850391963e-1, a6 = 0.140674564613555, a7 = -0.194192767363037, a8 = 0.890511168148729e-1;
+    A = a1 * pow(pr,-5) + a2 * pow(pr,-4) + a3 * pow(pr,-3) + a4 * pow(pr,-2) + a5 * pow(pr,-1) + a6 * pow(pr,-0.5) + a7 * pow(pr,-0.3) + a8;
+    u = x + x * (1 - x) * A;
+    h = hL + u * (hG - hL);
+    return h;
+}
+
+double TwoPhaseXH(double h, double Psat){
+    double pr;
+    double TL, TG, hL, hG;
+    double a1, a2, a3, a4, a5, a6, a7, a8;
+    double A;
+    double u, x, x1, x2;
+
+    h = h / 1000;
+    TL = SaturatedLTP(Psat);
+    TG = SaturatedGTP(Psat);
+    hL = SaturatedLHT(TL - 273.15);
+    hG = SaturatedGHT(TG - 273.15);
+    pr = Psat / P0;
+
+    u = (h - hL) / (hG - hL);
+    a1 = 0.285762691170231e-10, a2 = 0.102926100709812e-7, a3 = -0.248692308039487e-5, a4 = 0.202402830194857e-3;
+    a5 = -0.139571850391963e-1, a6 = 0.140674564613555, a7 = -0.194192767363037, a8 = 0.890511168148729e-1;
+    A = a1 * pow(pr,-5) + a2 * pow(pr,-4) + a3 * pow(pr,-3) + a4 * pow(pr,-2) + a5 * pow(pr,-1) + a6 * pow(pr,-0.5) + a7 * pow(pr,-0.3) + a8;
+    x1 = (A + 1 - pow(pow(A + 1, 2) - 4 * A * u, 0.5)) / 2 / A;
+    x2 = (A + 1 + pow(pow(A + 1, 2) - 4 * A * u, 0.5)) / 2 / A;
+
+    //cout<<x1<<'\t'<<x2<<endl;
+    if( -1e-8 <= x1 && x1 <= 1 + 1e-8)x = x1;
+    else {
+        if(-1e-8 <= x2 && x2 <= 1 + 1e-8) x = x2;
+        else {
+            //cout<<x1<<'\t'<<x2<<"Something wrong within the code TwoPhaseXH!!"<<endl;
+        x = -1;
+        }
+    }
+    if(x < 0 && x > - 0.5)x = 0;
+    if(x > 1) x = 1;
+    return x;
+}
+
+double TwoPhaseTH(double h, double Psat){
+    double pr;
+    double TL, TG, hL, hG;
+    double a1, a2, a3, a4, a5, a6, a7, a8;
+    double A;
+    double u,v;
+    double T;
+
+    h = h / 1000;
+    TL = SaturatedLTP(Psat);
+    TG = SaturatedGTP(Psat);
+    hL = SaturatedLHT(TL - 273.15);
+    hG = SaturatedGHT(TG - 273.15);
+    pr = Psat / P0;
+
+    v = (h - hL) / (hG - hL);
+    a1 = 0.436410851218165e-9, a2 = 0.129577214611149e-6, a3 = -0.296748888538039e-4, a4 = 0.205059338842641e-2;
+    a5 = -0.101727394861908, a6 = 0.843111650386904, a7 = -0.115006296802920e1, a8 = 0.299985943508301;
+    A = a1 * pow(pr,-5) + a2 * pow(pr,-4) + a3 * pow(pr,-3) + a4 * pow(pr,-2) + a5 * pow(pr,-1) + a6 * pow(pr,-0.5) + a7 * pow(pr,-0.3) + a8;
+    u = v + v * (1 - v) * A;
+    T = TL + u * (TG - TL);
+    return T;
+}
+
+double TwoPhaseSH(double h, double Psat){
+    double pr;
+    double TL, TG, hL, hG, sL, sG;
+    double a1, a2, a3, a4, a5, a6, a7, a8;
+    double A;
+    double v, u, s;
+
+    h = h / 1000;
+
+    TL = SaturatedLTP(Psat);
+    TG = SaturatedGTP(Psat);
+    hL = SaturatedLHT(TL - 273.15);
+    hG = SaturatedGHT(TG - 273.15);
+    sL = SaturatedLST(TL - 273.15);
+    sG = SaturatedGST(TG - 273.15);
+    pr = Psat / P0;
+    v = (h - hL) / (hG - hL);
+
+    u = v;
+    s = sL + u * (sG - sL);
+    return s;
+}
+
+double TwoPhaseHS(double s, double Psat){
+    double pr;
+    double TL, TG, hL, hG, sL, sG;
+    double a1, a2, a3, a4, a5, a6, a7, a8;
+    double A;
+    double v, u, h;
+
+    TL = SaturatedLTP(Psat);
+    TG = SaturatedGTP(Psat);
+    hL = SaturatedLHT(TL - 273.15);
+    hG = SaturatedGHT(TG - 273.15);
+    sL = SaturatedLST(TL - 273.15);
+    sG = SaturatedGST(TG - 273.15);
+    pr = Psat / P0;
+    u = (s - sL) / (sG - sL);
+
+    v = u;
+    h = hL + v * (hG - hL);
+    return h;
+}
+
+
+
+/***************************************************被调函数的子函数***************************************************/
+double CalculateV(double T, double v0){
+    double v;
+    v = T - v0;
+    return v;
+    }
+
+double CalculateU(double z, double z0, int denominator, double index, double u0){
+    double u;
+    u = pow(z - z0, index) / denominator + u0;
+    return u;
+    }
+
+int CalculateSU(double *p1, double *p2, double *p3, double v, double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8){
+    double A, B, C, D;
+    double m, n;
+    double delta;
+    int root;
+    A = 1;
+    B = a1 * v + a4;
+    C = a2 * pow(v, 2) + a5 * v + a7;
+    D = a3 * pow(v, 3) + a6 * pow(v, 2) + a8 * v;
+    m = C / A - pow(B, 2) / 3 / pow(A, 2);
+    n = D / A - B * C / 3 /pow(A, 2) + 2 * pow(B, 3) / 27 / pow(A,3);
+    delta = pow(n, 2) + 4 * pow(m, 3) / 27;
+    if(delta > 0)root = 1, *p1 = *p2 = *p3 = Power1_3(-n / 2 + pow(delta, 1.0 / 2) / 2) +  Power1_3(-n / 2 - pow(delta, 1.0 / 2) / 2) - B / 3 / A;
+    else {
+        if(delta == 0)root = 2, *p1 = 2 * Power1_3(-n / 2) - B / 3 / A, *p2 = *p3 = Power1_3(n / 2) - B / 3 / A;
+        else{
+            root = 3;
+            *p1 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3) - B / 3 / A;
+            *p2 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3 + 2 * pi / 3) - B / 3 / A;
+            *p3 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3 - 2 * pi / 3) - B / 3 / A;
+        }
+    }
+    return root;
+}
+
+int CalculateSV(double *p1, double *p2, double *p3, double u, double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8){
+    double A, B, C, D;
+    double m, n;
+    double delta;
+    int root;
+    A = a3;
+    B = a2 * u + a6;
+    C = a1 * pow(u, 2) + a5 * u + a8;
+    D = pow(u, 3) + a4 * pow(u, 2) + a7 * u;
+    m = C / A - pow(B, 2) / 3 / pow(A, 2);
+    n = D / A - B * C / 3 /pow(A, 2) + 2 * pow(B, 3) / 27 / pow(A,3);
+    delta = pow(n, 2) + 4 * pow(m, 3) / 27;
+    if(delta > 0)root = 1, *p1 = *p2 = *p3 = Power1_3(-n / 2 + pow(delta, 1.0 / 2) / 2) +  Power1_3(-n / 2 - pow(delta, 1.0 / 2) / 2) - B / 3 / A;
+    else {
+        if(delta == 0)root = 2, *p1 = 2 * Power1_3(-n / 2) - B / 3 / A, *p2 = *p3 = Power1_3(n / 2) - B / 3 / A;
+        else{
+            root = 3;
+            *p1 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3) - B / 3 / A;
+            *p2 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3 + 2 * pi / 3) - B / 3 / A;
+            *p3 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3 - 2 * pi / 3) - B / 3 / A;
+        }
+    }
+    return root;
+}
+
+double CalculateZ(double u, double u0, int denominator, double index, double z0){
+    double z;
+    z = pow(denominator * u + u0, index) + z0;
+    return z;
+    }
+
+double Power1_3(double num){
+    if(num < 0)return -pow(-num,1.0 / 3);
+    else return pow(num, 1.0/3);
+}
