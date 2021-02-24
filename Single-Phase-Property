@@ -1,0 +1,313 @@
+/********************************************************预编译********************************************************/
+
+/**调用库**/
+#include <iostream>
+#include <cmath>
+#include <fstream>
+
+/**宏定义**/
+#define pi 3.14159265
+
+using namespace std;
+/*******************************************************函数声明*******************************************************/
+
+static double P0 = 4902000;
+
+double SaturatedLTP(double Psat);
+double SaturatedGTP(double Psat);
+double SaturatedLHT(double Tsat);
+double SaturatedGHT(double Tsat);
+double SaturatedLST(double Tsat);
+double SaturatedGST(double Tsat);
+double SaturatedGRouT(double Tsat);
+double SaturatedLRouT(double Tsat);
+
+/**translate z into u**/
+double CalculateU(double z, double z0, int denominator = 1000, double index = 1.0, double u0 = 0);
+int CalculateSHV(double *v1, double *v2, double *v3, double TG, double uG, double u, double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11);
+int CalculateSHU(double *u1, double *u2, double *u3, double TG, double uG, double T, double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11);
+double Power1_3(double num);
+/**translate u or v into z**/
+double CalculateZ(double u, double u0, int denominator = 1000, double index = 1.0, double z0 = 0);
+
+/*******************************************************被调函数*******************************************************/
+
+/***************************************************************************************************************************************************/
+
+double SuperHeatedHT(double P, double T){
+
+    double TG,h0,hG,uG;
+    double a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11;
+    int root;
+    double u1, u2, u3;
+    double h;
+    T = T + 273.15;
+    TG = SaturatedGTP(P);
+    hG = SaturatedGHT(TG - 273.15);
+    h0 = 50;
+    uG = CalculateU(hG,h0,1,0.2);
+
+    a1 = 0.655368904952486e-4, a2 = 0.104964720228175e-6, a3 = 0.120781842461529e-11, a4 = -0.309242508452058e1;
+    a5 = -0.427745402912668e-3, a6 = -0.614126570060541e-6, a7 = -0.756339038615444e-10, a8 = 0.318525196100853e1;
+    a9 = 0.694321267029658e-3, a10 = 0.893862277683928e-6, a11 = 0.257754185833126e-9;
+    root = CalculateSHU(&u1,&u2,&u3,TG,uG,T,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+    if(root != 1){
+        //cout<<"Something wrong within the code SuperHeatedHT!!"<<endl;
+        return 0;
+    }
+    h = CalculateZ(u2,0,1,5,h0);
+    return h;
+}
+
+double SuperHeatedRouT(double P, double T){
+    double TG,rouG,uG;
+    double a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11;
+    int root;
+    double u1, u2, u3;
+    double rou;
+    T = T + 273.15;
+    TG = SaturatedGTP(P);
+    rouG = SaturatedGRouT(TG - 273.15);
+    uG = CalculateU(rouG,0,1,-0.4,0.75);
+    a1 = 0.169347786859482e-1, a2 = -0.391263315032514e-4, a3 = 0.436416993794122e-7, a4 = 0.175371690212062e1;
+    a5 = -0.204274840559141e-1, a6 = 0.393230641090647e-4, a7 = -0.457868739196494e-7, a8 = -0.120806074268803e1;
+    a9 = 0.655504316587795e-2, a10 = -0.837195897399936e-5, a11 = 0.979938358453164e-8;
+    root = CalculateSHU(&u1,&u2,&u3,TG,uG,T,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+                                                                            /**计算压力折合量**/
+    //if(root != 3){
+        //cout<<"Something wrong within the code SuperHeatedRouT!!"<<endl;
+        //return 0;
+    //}
+    rou = CalculateZ(u1,-0.75,1,-2.5, 0);
+    return rou;
+
+}
+
+double SuperHeatedST(double P, double T){
+
+    double TG,s0,sG,uG;
+    double a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11;
+    int root;
+    double u1, u2, u3;
+    double s;
+    T = T + 273.15;
+    TG = SaturatedGTP(P);
+    sG = SaturatedGST(TG - 273.15);
+    s0 = 0;
+    uG = CalculateU(sG,s0,-1,-1,1.0);
+
+    a1 = -0.189239105476273e-2, a2 = 0.700141317612934e-5, a3 = -0.771584224692756e-8, a4 = -0.490762065477025;
+    a5 = 0.187832511097945e-2, a6 = -0.644219241390291e-5, a7 = 0.702387017911990e-8, a8 = 0.801878904709872e-1;
+    a9 = -0.417493448857746e-3, a10 = 0.139233243870483e-5, a11 = -0.150905273849044e-8;
+    root = CalculateSHU(&u1,&u2,&u3,TG,uG,T,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);
+    if(root != 1){
+        cout<<"Something wrong within the code SuperHeatedST!!"<<endl;
+        return 0;
+    }
+    s = CalculateZ(u2,1,-1,-1,s0);
+    return s;
+}
+
+
+double SuperHeatedTH(double P, double h){
+    double u,uG;                                /**温度折合量**/
+    double TG,h0,hG;
+    double a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11;
+    int root;
+    double v1, v2, v3;
+    TG = SaturatedGTP(P);
+    hG = SaturatedGHT(TG - 273.15);
+    h0 = 50;
+    u = CalculateU(h / 1000,h0,1,0.2);
+    uG = CalculateU(hG,h0,1,0.2);
+    a1 = 0.655368904952486e-4, a2 = 0.104964720228175e-6, a3 = 0.120781842461529e-11, a4 = -0.309242508452058e1;
+    a5 = -0.427745402912668e-3, a6 = -0.614126570060541e-6, a7 = -0.756339038615444e-10, a8 = 0.318525196100853e1;
+    a9 = 0.694321267029658e-3, a10 = 0.893862277683928e-6, a11 = 0.257754185833126e-9;
+    root = CalculateSHV(&v1,&v2,&v3,TG,uG,u,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);           /**计算压力折合量**/
+    //if(root != 3){
+        //cout<<"Something wrong within the code SuperHeatedTH!!"<<endl;
+        //return 0;
+    //}
+    //if(v1 > 358){cout<<v1<<endl;v1 = 358;}
+    return v1;
+}
+
+double SuperHeatedTS(double P, double s){
+
+    double u, uG;
+    double TG,s0,sG;
+    double a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11;
+    int root;
+    double v1, v2, v3;
+
+    TG = SaturatedGTP(P);
+    sG = SaturatedGST(TG - 273.15);
+    s0 = 0;
+    u = CalculateU(s,s0,-1,-1,1.0);
+    uG = CalculateU(sG,s0,-1,-1,1.0);
+
+    a1 = -0.189239105476273e-2, a2 = 0.700141317612934e-5, a3 = -0.771584224692756e-8, a4 = -0.490762065477025;
+    a5 = 0.187832511097945e-2, a6 = -0.644219241390291e-5, a7 = 0.702387017911990e-8, a8 = 0.801878904709872e-1;
+    a9 = -0.417493448857746e-3, a10 = 0.139233243870483e-5, a11 = -0.150905273849044e-8;
+    root = CalculateSHV(&v1,&v2,&v3,TG,uG,u,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11);           /**计算压力折合量**/
+    //if(root != 3){
+        //cout<<"Something wrong within the code SuperHeatedTH!!"<<endl;
+        //return 0;
+    //}
+    return v1;
+}
+
+
+/****************************************************************************************************************************************************************/
+
+double SubCooledHT(double P, double T){
+    double TL,hL;
+    double a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14;
+    double hl;
+    double pr = P / P0;
+    double A, B;
+    T = T + 273.15;
+    TL = SaturatedLTP(P);
+    hL = SaturatedLHT(TL - 273.15);
+
+    //cout<<"T15"<<uG<<endl;
+    a1 = -1.32914668404302, a2 = 2.74352420912827, a3 = -2.19160054156544, a4 = 7.77381440183247e-1;
+    a5 = -1.23821079490220e-1, a6 = -3.53197360382042e-3, a7 = 8.18159986693181e-4, a8 = 3.04272577809866e1;
+    a9 = -6.02782276693675e1, a10 = 4.53608177798508e1, a11 = -1.37502755255435e1, a12 = 1.40958748057820;
+    a13 = 1.01957550215635, a14 = 1.31682212974544;
+    A = a1 * pow(pr, 6) + a2 * pow(pr, 5) + a3 * pow(pr, 4) + a4 * pow(pr, 3) + a5 * pow(pr, 2) + a6 * pr + a7;
+    B = a8 * pow(pr, 6) + a9 * pow(pr, 5) + a10 * pow(pr, 4) + a11 * pow(pr, 3) + a12 * pow(pr, 2) + a13 * pr + a14;
+    hl = hL - pow(TL - T, 2) * A - (TL - T) * B;
+    return hl;
+}
+
+double SubCooledTH(double P, double h){
+    double TL,hL;
+    double a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14;
+    double T, y1, y2;
+    double pr = P / P0;
+    double A, B, C;
+    TL = SaturatedLTP(P);
+    hL = SaturatedLHT(TL - 273.15);
+    h = h / 1000;
+
+    //cout<<"T15"<<uG<<endl;
+    a1 = -1.32914668404302, a2 = 2.74352420912827, a3 = -2.19160054156544, a4 = 7.77381440183247e-1;
+    a5 = -1.23821079490220e-1, a6 = -3.53197360382042e-3, a7 = 8.18159986693181e-4, a8 = 3.04272577809866e1;
+    a9 = -6.02782276693675e1, a10 = 4.53608177798508e1, a11 = -1.37502755255435e1, a12 = 1.40958748057820;
+    a13 = 1.01957550215635, a14 = 1.31682212974544;
+    A = a1 * pow(pr, 6) + a2 * pow(pr, 5) + a3 * pow(pr, 4) + a4 * pow(pr, 3) + a5 * pow(pr, 2) + a6 * pr + a7;
+    B = a8 * pow(pr, 6) + a9 * pow(pr, 5) + a10 * pow(pr, 4) + a11 * pow(pr, 3) + a12 * pow(pr, 2) + a13 * pr + a14;
+    C = h - hL;
+
+    if (abs(C)/h < 1e-5) return TL;
+    y1 = (- B - pow(pow(B, 2) - 4 * A * C, 0.5)) / 2 / A;
+    y2 = (- B + pow(pow(B, 2) - 4 * A * C, 0.5)) / 2 / A;
+    if(y2 >= 0)T = TL - y2;
+
+    else {
+        //cout<<P<<'\t'<<h<<'\t'<<hL<<'t'<<y2<<'\t'<<"Something wrong within the code SubcooledTH!!"<<endl;
+        //cout<<P<<'\t'<<h<<'\t'<<hL<<'\t'<<pow(B, 2) - 4 * A * C<<'\t'<<y1<<'\t'<<y2<<endl;
+    }
+
+    return T;
+}
+
+double SubCooledRouT(double P, double T){
+    double TL,rouL,zL;
+    double a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14;
+    double roul = 0, zl;
+    double pr = P / P0, pr2 = pr;
+    double A, B;
+
+
+    T = T + 273.15;
+    TL = SaturatedLTP(P);
+    //cout<<"inside"<<P<<endl;
+    rouL = SaturatedLRouT(TL - 273.15);
+
+    P = P / 1000;
+
+    if(P >= 61.95 && P <= 4043){
+        a1 = 1.15059942727550e1, a2 = -2.41727018299936e1, a3 = 1.98287257221905e1, a4 = -7.40849428067230;
+        a5 = 1.32813327361824, a6 = -2.53455450127540e-2, a7 = -6.45120090091289e-3, a8 = -2.53384959130990e2;
+        a9 = 5.04191529729223e2, a10 = -3.83194063619711e2, a11 = 1.20315829367335e2, a12 = -1.54247921599990e1;
+        a13 = -6.08910297438816, a14 = -2.76548864076367;
+        A = a1 * pow(pr, 6) + a2 * pow(pr, 5) + a3 * pow(pr, 4) + a4 * pow(pr, 3) + a5 * pow(pr, 2) + a6 * pr + a7;
+        B = a8 * pow(pr, 6) + a9 * pow(pr, 5) + a10 * pow(pr, 4) + a11 * pow(pr, 3) + a12 * pow(pr, 2) + a13 * pr + a14;
+        roul = rouL - pow(TL - T, 2) * A - (TL - T) * B;
+    }
+    else {
+        if(P > 4043 && P <= 4902){
+            pr2 = pow(pr, 6);
+            a1 = -1.59821739603479e-3, a2 = 6.10424292413335e-3, a3 = -9.71422070657555e-3, a4 = 8.50104431273055e-3;
+            a5 = -4.59444956375983e-3, a6 = 1.69473863307001e-3, a7 = -9.90012828367008e-4, a8 = -3.55351015992130e-3;
+            a9 = 5.18873190603401e-2, a10 = -1.61044175828148e-1, a11 = 2.26250498447474e-1, a12 = -1.75086634675999e-1;
+            a13 = 8.50639225350999e-2, a14 = -3.84778727862572e-2;
+            A = a1 * pow(pr2, 6) + a2 * pow(pr2, 5) + a3 * pow(pr2, 4) + a4 * pow(pr2, 3) + a5 * pow(pr2, 2) + a6 * pr2 + a7;
+            B = a8 * pow(pr2, 6) + a9 * pow(pr2, 5) + a10 * pow(pr2, 4) + a11 * pow(pr2, 3) + a12 * pow(pr2, 2) + a13 * pr2 + a14;
+            zL = pow((rouL / 1000), 9.5);
+            zl = zL - pow(TL - T, 2) * A - (TL - T) * B;
+            roul = 1000 * pow(zl, 1 / 9.5);
+        }
+        //else cout<<"P out of range of SubcooledRouT!!"<<endl;
+    }
+
+    return roul;
+}
+
+
+/****************************************************************************************************************************************************************/
+int CalculateSHV(double *v1, double *v2, double *v3, double TG, double uG, double u, double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11){
+    double coff;
+    double A, B, C, D;
+    double m, n;
+    double delta;
+    int root;
+    coff = 1 / uG + a1 * TG / uG + a2 * pow(TG, 2) / uG + a3 * pow(TG, 3) / uG + a4 / pow(uG, 2) + a5 * TG / pow(uG, 2) + a6 * pow(TG, 2) / pow(uG, 2) + a7 * pow(TG, 3) / pow(uG, 2) + a8 / pow(uG, 3) + a9 * TG / pow(uG, 3) + a10 * pow(TG, 2) / pow(uG, 3) + a11 * pow(TG, 3) / pow(uG, 3);
+    A = a11 + a7 * u + a3 * pow(u, 2);
+    B = a10 + a6 * u + a2 * pow(u, 2);
+    C = a9 + a5 * u + a1 * pow(u, 2);
+    D = a8 + a4 * u + pow(u, 2) - coff * pow(u, 3);
+    m = C / A - pow(B, 2) / 3 / pow(A, 2);
+    n = D / A - B * C / 3 /pow(A, 2) + 2 * pow(B, 3) / 27 / pow(A,3);
+    delta = pow(n, 2) + 4 * pow(m, 3) / 27;
+    if(delta > 0)root = 1, *v1 = *v2 = *v3 = Power1_3(-n / 2 + pow(delta, 1.0 / 2) / 2) +  Power1_3(-n / 2 - pow(delta, 1.0 / 2) / 2) - B / 3 / A;
+    else {
+        if(delta == 0)root = 2, *v1 = 2 * Power1_3(-n / 2) - B / 3 / A, *v2 = *v3 = Power1_3(n / 2) - B / 3 / A;
+        else{
+            root = 3;
+            *v1 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3) - B / 3 / A;
+            *v2 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3 + 2 * pi / 3) - B / 3 / A;
+            *v3 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3 - 2 * pi / 3) - B / 3 / A;
+        }
+    }
+    return root;
+}
+
+int CalculateSHU(double *u1, double *u2, double *u3, double TG, double uG, double T, double a1, double a2, double a3, double a4, double a5, double a6, double a7, double a8, double a9, double a10, double a11){
+    double coff;
+    double A, B, C, D;
+    double m, n;
+    double delta;
+    int root;
+    coff = 1 / uG + a1 * TG / uG + a2 * pow(TG, 2) / uG + a3 * pow(TG, 3) / uG + a4 / pow(uG, 2) + a5 * TG / pow(uG, 2) + a6 * pow(TG, 2) / pow(uG, 2) + a7 * pow(TG, 3) / pow(uG, 2) + a8 / pow(uG, 3) + a9 * TG / pow(uG, 3) + a10 * pow(TG, 2) / pow(uG, 3) + a11 * pow(TG, 3) / pow(uG, 3);
+    A = -coff;
+    B = 1 + a1 * T + a2 * pow(T, 2) + a3 * pow(T, 3);
+    C = a4 + a5 * T + a6 * pow(T, 2) + a7 * pow(T, 3);
+    D = a8 + a9 * T + a10 * pow(T, 2) + a11 * pow(T, 3);
+    m = C / A - pow(B, 2) / 3 / pow(A, 2);
+    n = D / A - B * C / 3 /pow(A, 2) + 2 * pow(B, 3) / 27 / pow(A,3);
+    delta = pow(n, 2) + 4 * pow(m, 3) / 27;
+    if(delta > 0)root = 1, *u1 = *u2 = *u3 = Power1_3(-n / 2 + pow(delta, 1.0 / 2) / 2) +  Power1_3(-n / 2 - pow(delta, 1.0 / 2) / 2) - B / 3 / A;
+    else {
+        if(delta == 0)root = 2, *u1 = 2 * Power1_3(-n / 2) - B / 3 / A, *u2 = *u3 = Power1_3(n / 2) - B / 3 / A;
+        else{
+            root = 3;
+            *u1 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3) - B / 3 / A;
+            *u2 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3 + 2 * pi / 3) - B / 3 / A;
+            *u3 = 2 * pow(-m / 3, 1.0 / 2 ) * cos(acos(-n / 2 / pow(-m / 3, 1.5)) / 3 - 2 * pi / 3) - B / 3 / A;
+        }
+    }
+    return root;
+}
