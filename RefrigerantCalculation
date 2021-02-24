@@ -1,0 +1,580 @@
+
+/********************************************************预编译********************************************************/
+
+/**调用库**/
+#include <iostream>
+#include <cmath>
+#include <fstream>
+
+/**宏定义**/
+#define pi 3.14159265
+#define e 2.718281828
+
+using namespace std;
+
+/*****************************************************定义全局变量*****************************************************/
+/**运行总环境**/
+extern double Patm;                                                                  /**标准大气压**/
+extern double g;                                                                     /**重力加速度**/
+
+/**制冷剂参数(R410a)**/
+extern double M;                                                             /**相对分子质量**/
+extern double Pr0;                                                         /**制冷剂临界压力**/
+
+/**几何参数(微元划分以换热器本身结构为参考，不考虑实际微元划分)**/
+extern int ntz, ntx, nf;                                              /**换热器管排数12（列数为4），翅片数128**/
+extern double tf, Pf, td;                                   /**翅片厚度、fin pitch、硅胶涂覆厚度**/
+extern double dlx, dlz;                                            /**微元横截面长、宽**/
+extern double Ro, Ri;                                           /**管外径，管内径**/
+
+extern double Aa;
+extern double Ar;                                                 /**制冷剂侧换热面积**/
+
+extern double Va;                                                   /**微元体积**/
+extern double Val;                              /**微元铝体积**/
+extern double Vcu;                             /**微元铜体积**/
+extern double Vd;                                                          /**微元干燥剂体积、干燥剂涂敷质量**/
+extern double epsal;
+                                                                                     /**铝、铜、干燥剂比体积**/
+extern double La;                                                          /**特征长度：空气体积/空气换热面积**/
+extern double Lad;                                                         /**特征长度：除湿剂体积**/
+extern double LaHX;                                         /**特征长度：DCHE基材体积/空气换热面积**/
+extern double LrHX;                                         /**特征长度：DCHE基材体积/制冷剂侧换热面积**/
+
+/**实际微元划分几何参数**/
+extern int nn;                                                                  /**除湿剂微元切分**/
+extern int ny, ny_multiple;                                                 /**翅片数128(=16个微元*8)（列数为4）**/
+
+extern int cycle_XYZ;                                               /**实际微元划分个数（列数为4）**/
+extern double dx, dn, dy;                         /**实际微元长度**/
+
+/**时间步长及循环参数**/
+extern double dlt;                                                             /**时间步长**/
+extern int cycle_T;                                                              /**计算循环个数**/
+extern int cycle_Tc, cycle_Th;                                         /**除湿循环次数，解吸循环次数**/
+
+/*******************************************************函数声明*******************************************************/
+double SaturatedLKT(double Tr);
+double SaturatedGKT(double Tr);
+double SaturatedLUT(double Tr);
+double SaturatedGUT(double Tr);
+double SaturatedLThT(double Tr);
+
+double SaturatedLPT(double Tsat);
+double SaturatedGPT(double Tsat);
+double SaturatedLHT(double Tsat);
+double SaturatedGHT(double Tsat);
+double SaturatedLRouT(double Tsat);
+double SaturatedGRouT(double Tsat);
+double SaturatedLCpT(double Tsat);
+double SaturatedGCpT(double Tsat);
+
+double SaturatedLTP(double Psat);
+double SaturatedGTP(double Psat);
+double SaturatedLTH(double hL);
+
+double TwoPhaseHX(double x, double Psat);
+double TwoPhaseXH(double h, double Psat);
+double TwoPhaseTH(double h, double Psat);
+
+double SuperHeatedHT(double P, double T);
+double SuperHeatedRouT(double P, double T);
+double SuperHeatedTH(double P, double h);
+double SuperHeatedCpT(double P, double T);
+
+double SubCooledHT(double P, double T);
+double SubCooledTH(double P, double h);
+double SubCooledRouT(double P, double T);
+double SubCooledCpT(double p, double T);
+
+/**Iteration Process to Get the Fluid Property According to the Estimated Pressure**/
+/**以估计压力为初值迭代出流体性质**/
+double Update_Property(int index, int i, double Tf, double p1, double c1, double c3, double pr, double pr_BFR, double mr_temp, double qr_temp, double ThPtpr[], double Result[]);
+//double Update_Frict_TP(double ThPtpr[], double Tr, double xr, double rour, double wr);
+
+double Update_Frict_Gronner(double ThPtpr[], double Tr, double xr, double rour, double wr);
+double Update_Frict_Fanning(double rour, double wr, double ur);
+/**Calculate the Evaporative Heat Transfer Coefficient**/
+double Update_HrC(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf);
+/**Calculate the Condensation Heat Transfer Coefficient**/
+double Update_HrH(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf);
+/**Calculate the Evaporative Heat Transfer Coefficient**/
+double Update_HtpC(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf);
+/**Calculate the Condensation Heat Transfer Coefficient**/
+inline double Update_HtpH(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf);
+/**Calculate the Convective Heat Transfer Coefficient**/
+double Update_Hr(double Tf, double Tr, double mr, double cpr, double kr, double ur);
+
+/**************************************************Main Function****************************************************/
+
+double Refrigerant(int j, int i, double Tf,double p1,double c1,double c2,double c3,double pr_temp,double pr_BFR,double mr_temp,double qr_BCK,double ThPtpr[],double Result[]){
+
+    int times_pr = 1;
+    bool flag_pr = 1;
+    double pr, hr;
+
+    /**Iteration Process to Get the Fluid Pressure**/
+    /**以估计压力为初值迭代出实际压力**/
+    while (flag_pr){
+        //if(i==22)cout<<i<<'\t'<<pr_temp<<endl;
+        /**Calculate the Fluid Properties by the Estimated Pressure**/
+        /**计算此时间和空间微元的流体性质（使用预估的压力）**/
+        hr = Update_Property(j, i, Tf,p1,c1,c3,pr_temp,pr_BFR,mr_temp,qr_BCK,ThPtpr,Result);
+        /**Calculate the Fluid Pressure by the Estimated Pressure**/
+        /**计算此时间和空间微元的流体压力（使用预估的压力）**/
+        switch (i){
+        case 1:
+            pr = (c2 - dlt * Result[9] - Result[5] * Result[6]) / p1 - Result[8];
+            break;
+        case 2:
+            pr = (c2 - dlt * Result[9] - Result[5] * Result[6]) / 5 / p1 - Result[8];
+            break;
+        default:
+            pr = (c2 - dlt * Result[9] - Result[5] * Result[6]) / 3 / p1 - Result[8];
+            break;
+        }
+
+        /**Iteration Criteria**/
+        /**迭代判据**/
+
+        if(times_pr >= 11){
+            flag_pr = (fabs((pr - pr_temp) / pr) < 5e-6) ? 0 : 1;
+            pr_temp = pr / 2 + pr_temp / 2;
+            //cout<<i<<'\t'<<pr<<'\t'<<pr_temp<<'\t'<<fabs(pr - pr_temp) / pr<<endl;
+        }
+        else {
+            flag_pr = (fabs((pr - pr_temp) / pr) < 1e-7) ? 0 : 1;
+            pr_temp = pr;
+        }
+        times_pr++;
+        if(j == 59 && (i == 26 || i == 27))cout<<"pr"<<i<<'\t'<<times_pr<<'\t'<<Result[9]<<'\t'<<Result[5]<<'\t'<<Result[6]<<'\t'<<Result[8]<<'\t'<<pr<<'\t'<<pr_temp<<'\t'<<fabs(pr - pr_temp) / pr<<endl;
+    }
+
+
+    Result[0] = pr;
+    return hr;
+}
+
+/**Iteration Process to Get the Fluid Property According to the Estimated Pressure**/
+/**以估计压力为初值迭代出流体性质**/
+double Update_Property(int j, int i, double Tf, double p1, double c1, double c3, double pr, double pr_BFR, double mr_temp, double qr, double ThPtpr[], double Result[]){
+
+    /**Variable Identification**/
+    bool flag_ir = 1, flag_mr;
+    int times_ir = 1, times_mr;
+    double ir, ir_temp, mr;
+    double xr, Tr, epir, epirMAX, epirMIN, rour, wr, hr, momr, frict;
+    double rouL, rouG, cpL, cpG, kL, kG, uL, uG, thL;
+
+    /**Calculate Saturated Temperature and Enthalpy based on the Assumed Pressure**/
+    /**根据当前压力，计算饱和蒸气及液体的温度和焓值（当前压力下，两相的临界焓值）**/
+    double TrL = SaturatedLTP(pr) - 273.15, TrG = SaturatedGTP(pr) - 273.15;
+    double iL = 1000 * SaturatedLHT(TrL), iG = 1000 * SaturatedGHT(TrG);
+    //if(i == 635)cout<<iL<<'\t'<<iG<<endl;
+    ir_temp = ir = (c3 + dlt * qr + pr - pr_BFR) / c1;
+
+    /**Iteration Process to Get the Convective Heat**/
+    /**以估计对流热为初值迭代出流体焓值等一系列性质**/
+    while (flag_ir){
+
+
+        /**Calculate Fluid Enthalpy based on the Assumed Pressure and Convective Heat**/
+        /**使用预估的对流热（及压力）计算流体焓值**/
+        //ir = (c3 + dlt * (qr + qr_BFR) / 2 + pr - pr_BFR) / c1;
+        //if(i == 635)cout<<ir<<endl;
+        /**Calculate Other Fluid Property based on the Assumed Pressure and Convective Heat**/
+        /**使用预估的对流热（及压力）计算流体其他性质**/
+        /**Classification: Two-Phase Condition**/
+        /**分类讨论：两相区**/
+        if(ir_temp >= iL && ir_temp < iG){
+
+            flag_mr = 1, times_mr = 1;
+            Tr = TwoPhaseTH(ir_temp, pr) - 273.15;
+            xr = TwoPhaseXH(ir_temp, pr);
+            //if(i == 635)cout<<xr<<endl;
+            ThPtpr[0] = rouL = SaturatedLRouT(Tr);
+            ThPtpr[1] = rouG = SaturatedGRouT(Tr);
+            ThPtpr[2] = iL = 1000 * SaturatedLHT(Tr);
+            ThPtpr[3] = iG = 1000 * SaturatedGHT(Tr);
+            ThPtpr[4] = cpL = 1000 * SaturatedLCpT(Tr);
+            ThPtpr[5] = cpG = 1000 * SaturatedGCpT(Tr);
+            ThPtpr[6] = kL = SaturatedLKT(Tr);
+            ThPtpr[7] = kG = SaturatedGKT(Tr);
+            ThPtpr[8] = uL = SaturatedLUT(Tr);
+            ThPtpr[9] = uG = SaturatedGUT(Tr);
+            ThPtpr[10] = thL = SaturatedLThT(Tr);
+
+            /**Calculate Fluid Density based on the Assumed Mass Flow Rate**/
+            /**使用预估的流量计算流体密度**/
+            while (flag_mr){
+                if (min(fabs(1 - xr), fabs(xr)) > 1e-6) epir = xr / ((1 + 0.12 * (1 - xr)) * (xr / rouG + (1 - xr) / rouL) + 1.18 * (1 - xr) * pow(g * thL * (rouL - rouG), 0.25) / pow(mr_temp, 2) / pow(rouL, 0.5)) / rouG;
+                else {
+                    if (fabs(1 - xr) < 1e-6) {
+                        epirMAX = (1 - 1e-6) / ((1 + 0.12 * 1e-6) * ((1 - 1e-6) / rouG + 1e-6 / rouL) + 1.18 * 1e-6 * pow(g * thL * (rouL - rouG), 0.25) / pow(mr_temp, 2) / pow(rouL, 0.5)) / rouG;
+                        epir = 1 -  (1 - epirMAX) * (1 - xr) / 1e-6;
+                        cout<<"ATTENTION_MAX!!!!!!!!!!!!!"<<'\t'<<xr<<'\t'<<epirMAX<<'\t'<<epir<<'\t'<<j<<'\t'<<i<<endl;
+                    }
+                    else {
+                        epirMIN = 1e-6 / ((1 + 0.12 * (1 - 1e-6)) * (1e-6 / rouG + (1 - 1e-6) / rouL) + 1.18 * (1 - 1e-6) * pow(g * thL * (rouL - rouG), 0.25) / pow(mr_temp, 2) / pow(rouL, 0.5)) / rouG;
+                        epir = epirMIN * xr / 1e-6;
+                        cout<<"ATTENTION_MIN!!!!!!!!!!!!!"<<'\t'<<xr<<'\t'<<epirMIN<<'\t'<<epir<<'\t'<<j<<'\t'<<i<<endl;
+                    }
+                }
+                rour = (1 - epir) * rouL + epir * rouG;
+                switch (i){
+                case 1:
+                    wr = (c1 - rour) / p1 / rour;
+                    break;
+                case 2:
+                    wr = (c1 - rour) / 5 / p1 / rour;
+                    break;
+                default:
+                    wr = (c1 - rour) / 3 / p1 / rour;
+                    break;
+                }
+                mr = rour * wr;
+                //if(re == 1804)cout<<i<<'\t'<<Tr<<'\t'<<xr<<'\t'<<epir<<'\t'<<mr<<endl;
+                /**Iteration Criteria**/
+                /**迭代判据**/
+                flag_mr = (fabs((mr_temp - mr) / mr) < 1e-8) ? 0 : 1;
+                if(times_mr >= 11)cout<<"mr"<<'\t'<<i<<'\t'<<pr<<'\t'<<epir<<'\t'<<rour<<'\t'<<wr<<'\t'<<mr<<'\t'<<mr_temp<<endl;
+                //if(i == 635)cout<<fabs((mr_temp - mr) / mr)<<endl;
+                mr_temp = mr;
+                times_mr++;
+            }
+            if(Tf > Tr)hr = Update_HrC(ThPtpr,Tr,pr,xr,mr,Tf);
+            else hr = Update_HrH(ThPtpr,Tr,pr,xr,mr,Tf);
+            if (fabs(1-xr) < 1e-6 || fabs(xr) < 1e-6) {
+                momr = pow(mr,2) / rour;
+                cout<<"CONTINUE!!!!!!!!!!!!!"<<'\t'<<xr<<'\t'<<epir<<'\t'<<mr<<'\t'<<rour<<'\t'<<momr<<'\t'<<j<<'\t'<<i<<endl;
+            }
+            else momr = pow(mr,2) * (pow(1 - xr,2) / rouL / (1 - epir) + pow(xr,2) / rouG / epir);
+            frict = Update_Frict_Gronner(ThPtpr,Tr,xr,rour,wr);
+        }
+
+        else
+        {
+            /**Classification: Superheated Condition**/
+            /**分类讨论：过热区**/
+            //if(i == 635)cout<<ir<<endl;
+            if(ir_temp >= iG)
+            {
+                epir = xr = 1;
+                Tr = SuperHeatedTH(pr,ir_temp) - 273.15;
+                rour = SuperHeatedRouT(pr,Tr);
+                ThPtpr[5] = cpG = SuperHeatedCpT(pr,Tr);
+                ThPtpr[7] = kG = SaturatedGKT(Tr);
+                ThPtpr[9] = uG = SaturatedGUT(Tr);
+                switch (i){
+                case 1:
+                    wr = (c1 - rour) / p1 / rour;
+                    break;
+                case 2:
+                    wr = (c1 - rour) / 5 / p1 / rour;
+                    break;
+                default:
+                    wr = (c1 - rour) / 3 / p1 / rour;
+                    break;
+                }
+                mr = rour * wr;
+                hr = Update_Hr(Tf,Tr,mr,cpG,kG,uG);
+                //if(re == 387 && i <= 3)cout<<"here!!!"<<'\t'<<i<<'\t'<<hr<<'\t'<<Tf<<'\t'<<Tr<<'\t'<<mr<<'\t'<<cpG<<'\t'<<kG<<'\t'<<uG<<endl;
+                momr = pow(mr,2) / rour;
+                frict = Update_Frict_Fanning(rour,wr,uG);
+            }
+
+            /**Classification: Subcooled Condition**/
+            /**分类讨论：过冷区**/
+            else
+            {
+                //cout<<"here!!!"<<'\t'<<i<<'\t'<<pr<<'\t'<<ir<<endl;
+                epir = xr = 0;
+                Tr = SubCooledTH(pr,ir_temp) - 273.15;
+                //if(re == 2012 && i >= 643 && i <= 643)cout<<Tr<<endl;
+                rour = SubCooledRouT(pr,Tr);
+                //if(j == 59 && i == 27) cout<<'\t'<<i<<'\t'<<"position2!"<<'\t'<<pr<<'\t'<<Tr<<endl;
+                ThPtpr[4] = cpL = SubCooledCpT(pr,Tr);
+                ThPtpr[6] = kL = SaturatedLKT(Tr);
+                ThPtpr[8] = uL = SaturatedLUT(Tr);
+                switch (i){
+                case 1:
+                    wr = (c1 - rour) / p1 / rour;
+                    break;
+                case 2:
+                    wr = (c1 - rour) / 5 / p1 / rour;
+                    break;
+                default:
+                    wr = (c1 - rour) / 3 / p1 / rour;
+                    break;
+                }
+                mr = rour * wr;
+
+                hr = Update_Hr(Tf,Tr,mr,cpL,kL,uL);
+                momr = pow(mr,2) / rour;
+                frict = Update_Frict_Fanning(rour,wr,uL);
+                //cout<<mr<<'\t'<<hr<<'\t'<<momr<<'\t'<<frict<<'\t'<<endl;
+            }
+        }
+        qr = hr * (Tf - Tr) * 2 / Ri;
+
+        /**Iteration Criteria**/
+        /**迭代判据**/
+
+        //if(times_ir >= 100)flag_ir = (fabs((qr_temp - qr) / qr) < 1e-1 || fabs (qr_temp - qr) < 1e-4) ? 0 : 1;
+        ir = (c3 + dlt * qr + pr - pr_BFR) / c1;
+        //if(j == 59 && (i == 26 || i == 27) && times_ir <= 20) cout<<i<<'\t'<<times_ir<<'\t'<<pr<<'\t'<<ir_temp<<'\t'<<ir<<'\t'<<frict<<'\t'<<rour<<'\t'<<wr<<'\t'<<momr<<'\t'<<1 - xr<<'\t'<<1 - epir<<endl;
+        //if(i==23)cout<<"ir"<<'\t'<<i<<'\t'<<ir<<'\t'<<ir_temp<<'\t'<<fabs(ir_temp - ir) / ir<<endl;
+        flag_ir = (fabs((ir_temp - ir) / ir) < 1e-5) ? 0 : 1;
+        if(times_ir >= 20){
+            flag_ir = (fabs((ir_temp - ir) / ir) < 1e-4) ? 0 : 1;
+            //cout<<"warning_ir"<<'\t'<<fabs((ir_temp - ir) / ir)<<endl;
+            //cout<<i<<'\t'<<ir_temp<<'\t'<<xr<<'\t'<<hr<<'\t'<<ir<<endl;
+        }
+        ir_temp = ir / 2 + ir_temp / 2;
+        //if(i==22)cout<<"here"<<'\t'<<i<<'\t'<<ir / 2<<'\t'<<ir_temp<<endl;
+        //if(times_ir >= 100)flag_ir = (fabs((ir_temp - ir) / ir) < 1e-4) ? 0 : 1;
+        //cout<<re<<'\t'<<i<<'\t'<<qr<<'\t'<<qr_temp<<'\t'<<(qr - qr_temp) / qr<<endl;
+        times_ir++;
+    }
+
+    Result[1] = ir;
+    Result[2] = xr;
+    Result[3] = Tr;
+    Result[4] = epir;
+    Result[5] = rour;
+    Result[6] = wr;
+    Result[7] = qr;
+    Result[8] = momr;
+    Result[9] = frict;
+
+    return hr;
+}
+
+/***************************************************************************************************************************************************************/
+
+double Update_Frict_Gronner(double ThPtpr[], double Tr, double xr, double rour, double wr){
+
+    /**Variable Identification**/
+    double rouL = ThPtpr[0];
+    double rouG = ThPtpr[1];
+    double uL = ThPtpr[8];
+    double uG = ThPtpr[9];
+    double mr;
+    double dltpL_Z, fL, REL;
+    double FRL, fFR, dltpFr_Z, fyrGD;
+    double dltpr_Frict_Z;
+
+    /**Pressure Gradient of the Saturated Liquid**/
+    mr = fabs(rour * wr);
+    REL = 2 * Ri * mr / uL;
+    fL = 0.079 / pow(REL, 0.25);
+    dltpL_Z = fL * pow(mr, 2) / rouL / Ri;
+    if(mr <= 0)dltpL_Z = - dltpL_Z;
+    /**Coefficient of the Pressure Gradient of the Fluid versus that of the Saturated Liquid**/
+    FRL = pow(mr, 2) / (2 * Ri * g * pow(rouL,2));
+    if(FRL >= 1) fFR = 1;
+    else fFR = pow(FRL, 0.3) + 0.0055 * pow(log(1 / FRL), 2);
+    dltpFr_Z = fFR * (xr + 4 * (pow(xr, 1.8) - pow(xr, 10) * pow(fFR, 0.5)));
+    fyrGD = 1 + dltpFr_Z * (rouL / rouG / pow(uL / uG, 0.25) - 1);
+    /**Pressure Gradient due to the Friction**/
+    dltpr_Frict_Z = fyrGD * dltpL_Z;
+    return dltpr_Frict_Z;
+
+}
+
+double Update_Frict_Fanning(double rour, double wr, double ur){
+
+    double mr;
+    double Frict_Fanning, fr, REr;
+
+    mr = rour * wr;
+    REr = 2 * Ri * fabs(mr) / ur;
+    fr = 0.079 / pow(REr, 0.25);
+    Frict_Fanning = fr * pow(mr, 2) / rour / Ri;
+    if(mr <= 0)Frict_Fanning = - Frict_Fanning;
+    return Frict_Fanning;
+}
+
+/****************************************************************************************************************************************************/
+
+/**Calculate the Evaporative Heat Transfer Amount**/
+double Update_HrC(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf){
+
+    /**Variable Identification**/
+    double Htp;
+    double cpL = ThPtpr[4];
+    double cpG = ThPtpr[5];
+    double kL = ThPtpr[6];
+    double kG = ThPtpr[7];
+    double uL = ThPtpr[8];
+    double uG = ThPtpr[9];
+
+    if(0.2 <= xr && xr <= 0.8) Htp = Update_HtpC(ThPtpr,Tr,pr,xr,mr,Tf);
+    else {
+        if(xr < 0.2) Htp = xr * Update_HtpC(ThPtpr,Tr,pr,0.2,mr,Tf) / 0.2 + (0.2 - xr) * Update_Hr(Tf,Tr,mr,cpL,kL,uL) / 0.2;
+        else Htp = (1 - xr) * Update_HtpC(ThPtpr,Tr,pr,0.8,mr,Tf) / 0.2 + (xr - 0.8) * Update_Hr(Tf,Tr,mr,cpG,kG,uG) / 0.2;
+    }
+    Htp = (Htp >= 1e4) ? 1e4 : Htp;
+    //cout<<Htp<<endl;
+    return Htp;
+}
+
+double Update_HrH(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf){
+
+    /**Variable Identification**/
+    double Htp;
+    double cpL = ThPtpr[4];
+    double cpG = ThPtpr[5];
+    double kL = ThPtpr[6];
+    double kG = ThPtpr[7];
+    double uL = ThPtpr[8];
+    double uG = ThPtpr[9];
+
+    if(0.2 <= xr && xr <= 0.8) Htp = Update_HtpH(ThPtpr,Tr,pr,xr,mr,Tf);
+    else {
+        if(xr < 0.2) Htp = xr * Update_HtpH(ThPtpr,Tr,pr,0.2,mr,Tf) / 0.2 + (0.2 - xr) * Update_Hr(Tf,Tr,mr,cpL,kL,uL) / 0.2;
+        else Htp = (1 - xr) * Update_HtpH(ThPtpr,Tr,pr,0.8,mr,Tf) / 0.2 + (xr - 0.8) * Update_Hr(Tf,Tr,mr,cpG,kG,uG) / 0.2;
+    }
+    Htp = (Htp >= 1e4) ? 1e4 : Htp;
+    return Htp;
+}
+
+/**Calculate the Evaporative Heat Transfer Coefficient**/
+double Update_HtpC(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf){
+
+    /**Variable Identification**/
+    double rouL = ThPtpr[0];
+    double rouG = ThPtpr[1];
+    double cpL = ThPtpr[4];
+    double kL = ThPtpr[6];
+    double uL = ThPtpr[8];
+    //double thL = ThPtpr[10];
+    double PR = pr / Pr0;
+    double Fr, REL, PRL, Hlor, Sr, Hpool;
+    double qtp, qtp_temp = 10000, Htp;
+
+    bool flag_Htp = 1;
+    int times_Htp = 1;
+
+    //Cr = pow((1 - xr) / xr, 0.8) * pow(rouG / rouL, 0.5);
+    //cout<<'C'<<'\t'<<Cr<<endl;
+    //CFr = pow( thL / (rouL - rouG) / g, 0.5) / 2 / Ri;
+    //Fr = 1.061 * exp(0.042 / Cr);
+    //cout<<CFr<<endl;
+
+    //Sr = 0.238 * pow(Cr, 0.238) / pow(CFr, 1.11);
+    //cout<<'S'<<'\t'<<Sr<<endl;
+
+    PRL = uL * cpL / kL;
+    REL = (1 - xr) * fabs(mr) * 2 * Ri / uL;
+    Hlor = 0.023 * pow(REL, 0.8) * pow(PRL, 0.4) * kL / 2 / Ri;
+    Fr = pow(1 + xr * PRL *(rouL / rouG - 1), 0.35);
+    Sr = pow(1 + 0.55 * pow(Fr, 0.1) * pow(REL, 0.16), -1);
+
+    while(flag_Htp){
+        Hpool = 55 * pow(PR, 0.12) * pow(-log10(PR), -0.55) * pow(M, -0.5) * pow(qtp_temp, 0.67);
+        Htp = Fr * Hlor + Sr * Hpool;
+        qtp = fabs(Htp * (Tf - Tr));
+        flag_Htp = (fabs(qtp - qtp_temp) / qtp < 1e-8)? 0 : 1;
+        times_Htp = times_Htp + 1;
+        qtp_temp = qtp;
+    }
+    return Htp;
+}
+
+/**Calculate the Condensation Heat Transfer Coefficient**/
+inline double Update_HtpH(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf){
+
+    /**Variable Identification**/
+    double rouL = ThPtpr[0];
+    double rouG = ThPtpr[1];
+    double hL = ThPtpr[2];
+    double hG = ThPtpr[3];
+    double cpL = ThPtpr[4];
+    double kL = ThPtpr[6];
+    double uL = ThPtpr[8];
+    double uG = ThPtpr[9];
+
+    double qtp, qtp_temp = 10000;
+    double REL, PRL, Hlr, Xttr;
+    double BOr;
+    double Htp;
+    bool flag_Htp = 1;
+    int times_Htp = 1;
+
+    REL = (1 - xr) * fabs(mr) * 2 * Ri / uL;
+    PRL = uL * cpL / kL;
+    Hlr = 0.023 * pow(REL, 0.8) * pow(PRL, 0.4) * kL / 2 / Ri;
+
+    Xttr = pow((1 - xr) / xr, 0.9) * pow(rouG / rouL, 0.5) * pow(uL / uG, 0.1);
+    while(flag_Htp){
+        BOr = qtp_temp / fabs(mr) / (hG - hL);
+        Htp = Hlr * 22.4 * pow((1 + 2 / Xttr), 0.81) * pow(BOr, 0.33);
+        qtp = fabs(Htp * (Tf - Tr));
+        flag_Htp = (fabs(qtp - qtp_temp) / qtp < 1e-8)? 0 : 1;
+        times_Htp = times_Htp + 1;
+        qtp_temp = qtp;
+        }
+    return Htp;
+}
+
+
+/**Calculate the Convective Heat Transfer Coefficient**/
+double Update_Hr(double Tf, double Tr, double mr, double cpr, double kr, double ur){
+
+     /**Variable Identification**/
+    double PR,RE,NUr;                                                                /**制冷剂的普朗克常数,制冷剂的雷诺数**/
+    double Hr;                                                                       /**制冷剂的努赛尔数；制冷剂的对流换热系数**/
+
+    PR = ur * cpr / kr;                                                              /**普朗克常数：定义式**/
+    RE = fabs(mr) * (2 * Ri) / ur;                                                   /**雷诺数：定义式**/
+    if(Tf >= Tr)NUr = 0.023 * pow(RE,0.8) * pow(PR,0.4);                             /**努塞尔数：经验关联式**/
+    else NUr = 0.023 * pow(RE,0.8) * pow(PR,0.3);
+    Hr = NUr * kr / (2 * Ri);                                                        /**对流换热系数：定义式**/
+    return Hr;
+}
+
+/**************************************************************************************************************************************************/
+double SuperHeatedCpT(double pr, double Tr){
+    double cp;
+    cp = 1e5 * (SuperHeatedHT(pr,Tr + 0.01) - SuperHeatedHT(pr,Tr));
+    //cout<<cp<<endl;
+    return cp;
+}
+
+double SubCooledCpT(double pr, double Tr){
+    double cp;
+    cp = 1e5 * (SubCooledHT(pr,Tr) - SubCooledHT(pr,Tr - 0.01));
+    //cout<<cp<<endl;
+    return cp;
+}
+
+double SaturatedLKT(double Tr){
+    double kL;
+    kL = (-2.14308655e-8 * pow(Tr, 4) - 4.64639713e-8 * pow(Tr, 3) + 2.98936195e-4 * pow(Tr, 2) - 4.14289017e-1 * Tr + 91.5022943) / 1000;
+    return kL;
+}
+
+double SaturatedGKT(double Tr){
+    double kG;
+    kG = (1.27439678e-7 * pow(Tr, 4) - 7.67127910e-6 * pow(Tr, 3) + 5.24445508e-4 * pow(Tr, 2) + 0.0696909911 * Tr + 10.1084650) / 1000;
+    return kG;
+}
+
+double SaturatedLUT(double Tr){
+    double uL;
+    uL = 2.38792070e-13 * pow(Tr, 4) - 1.04671492e-10 * pow(Tr, 3) + 1.81435101e-8 * pow(Tr, 2) - 2.77644014e-6 * Tr + 2.42638774e-4;
+    return uL;
+}
+
+double SaturatedGUT(double Tr){
+    double uG;
+    uG = -2.77476699e-15 * pow(Tr, 5) + 5.57460712e-13 * pow(Tr, 4) - 3.25865533e-11 * pow(Tr, 3) + 7.45101326e-10 * pow(Tr, 2) + 3.47247943e-8 * Tr + 1.11536344e-5;
+    return uG;
+}
+
+double SaturatedLThT(double Tr){
+    double thL;
+    thL = (7.81560613e-7 * pow(Tr, 3) + 1.22977959e-4 * pow(Tr, 2) - 1.43729572e-1 * Tr + 12.6954000) / 1000;
+    return thL;
+}
