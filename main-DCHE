@@ -1,0 +1,1133 @@
+/**20180606修改**/
+/**时间补偿改进**/
+
+/*******************************************************错误总结*******************************************************/
+
+/****/
+
+/********************************************************预编译********************************************************/
+
+/**调用库**/
+#include <iostream>
+#include <cmath>
+#include <fstream>
+
+/**宏定义**/
+#define pi 3.14159265
+#define e 2.718281828
+
+using namespace std;
+
+/*****************************************************定义全局变量*****************************************************/
+
+/**运行总环境**/
+double Patm = 1.01325e5;                                                      /**标准大气压**/
+double g = 9.8;                                                               /**重力加速度**/
+
+/**换热器热力学参数**/
+double roual = 2700.0, roucu = 8900.0;                                        /**翅片密度，铜管密度**/
+double lal = 203.0, lcu = 407.0;                                              /**翅片导热系数，铜管导热系数**/
+double cal = 880.0, ccu = 390.0;                                              /**翅片比热容，铜管比热容**/
+
+/**除湿材料热力学参数**/
+double Bd = 0.74422, Cd = 0.09965, Dd = 0.5243;                               //硅胶等温吸附曲线by郑旭师姐
+double Wd0;                                                                   /**硅胶初始吸附量**/
+double roud = 1000, cd = 921.0;                                               /**吸附剂密度，比热容**/
+double RHa[26], Wda[26], RHd[12], Wdd[12];
+
+/**空气参数**/
+double ua;                                                                    //**空气流速**/
+double ha;                                                                    /**空气的对流换热系数**///
+double roua = 1.2;                                                            /**空气密度**/
+double mua = 1.845e-5;                                                        /**空气粘度**/
+double ka = 0.0321;                                                           /**空气导热系数**/
+double cpa = 1035.0, cpg = 1864.0;                                            /**干空气比热容，水蒸气比热容**/
+double hfg = 2260000.0;                                                       /**水的潜热（？0度）**/
+double D0 = 8e-7;
+
+/**制冷剂参数(R410a)**/
+double M = 72.58;                                                             /**相对分子质量**/
+double Pr0 = 4902000;                                                         /**制冷剂临界压力**/
+double xrc0 = 0.05;                                                           /**蒸发器入口侧制冷剂含气率**/
+
+/**几何参数(微元划分以换热器本身结构为参考，不考虑实际微元划分)**/
+int ntz = 12, ntx = 4, nf = 128;                                               /**换热器管排数（列数为4），翅片数128**/
+double tf = 1.5e-4, Pf = 2.5e-3, td = 2e-4;                                   /**翅片厚度、fin pitch、硅胶涂覆厚度**/
+double dlx = 22.5e-3, dlz = 24e-3;                                            /**微元横截面长、宽**/
+double Ro = 4.76e-3, Ri = 3.925e-3;                                           /**管外径，管内径**/
+
+double Aa = 2 * pi * (Ro + td) * (Pf - tf - 2 * td) + 2 * (dlx * dlz - pi * pow (Ro + td,2));
+double Ar = 2 * pi * Ri * Pf;                                                 /**制冷剂侧换热面积**/
+
+double Va = dlx * dlz * Pf;                                                   /**微元体积**/
+double Val = (dlx * dlz - pi * pow (Ro,2)) * tf;                              /**微元铝体积**/
+double Vcu = Pf * pi * (pow (Ro,2) - pow (Ri,2));                             /**微元铜体积**/
+double Vd = Aa * td, Md = Vd * ntx * ntz * nf * roud;                         /**微元干燥剂体积、干燥剂涂敷质量**/
+double epsal = Val / (Vcu + Val + Vd), epscu = Vcu / (Vcu + Val + Vd), epsd = Vd / (Vcu + Val + Vd);
+                                                                                     /**铝、铜、干燥剂比体积**/
+
+double La = Va / Aa;                                                          /**特征长度：空气体积/空气换热面积**/
+double Lad = Vd / Aa;                                                         /**特征长度：除湿剂体积**/
+double LaHX =  (Vcu + Val + Vd) / Aa;                                         /**特征长度：DCHE基材体积/空气换热面积**/
+double LrHX =  (Vcu + Val + Vd) / Ar;                                         /**特征长度：DCHE基材体积/制冷剂侧换热面积**/
+
+/**实际微元划分几何参数**/
+int nn = 5;                                                                   /**除湿剂微元切分**/
+int ny = 4, ny_multiple = 32;                                                        /**翅片数128(=16个微元*8)（列数为4）**/
+
+int cycle_XYZ = ny * ntx * ntz;                                               /**实际微元划分个数（列数为4）**/
+double dx = dlx, dn = td / nn, dy = ny_multiple * Pf;                         /**实际微元长度**/
+
+/**时间步长及循环参数**/
+double dlt = 1, dlt_mass = 0.02;                                              /**时间步长**/
+int dlt_ratio = 50;
+int cycle_T = 3;                                                              /**计算循环个数**/
+int cycle_Tc = 180, cycle_Th = 180;                                           /**除湿循环次数，解吸循环次数**/
+bool flag_cycle = 0;                                                          /**初始循环标识：0为蒸发器，1为冷凝器**/
+
+/*******************************************************************************************************************************/
+double SaturatedLKT(double Tr);
+double SaturatedGKT(double Tr);
+double SaturatedLUT(double Tr);
+double SaturatedGUT(double Tr);
+double SaturatedLThT(double Tr);
+
+double SaturatedLPT(double Tsat);
+double SaturatedGPT(double Tsat);
+double SaturatedLHT(double Tsat);
+double SaturatedGHT(double Tsat);
+double SaturatedLRouT(double Tsat);
+double SaturatedGRouT(double Tsat);
+double SaturatedLCpT(double Tsat);
+double SaturatedGCpT(double Tsat);
+
+double SaturatedLTP(double Psat);
+double SaturatedGTP(double Psat);
+double SaturatedLTH(double hL);
+
+double TwoPhaseHX(double x, double Psat);
+double TwoPhaseXH(double h, double Psat);
+double TwoPhaseTH(double h, double Psat);
+
+double SuperHeatedHT(double P, double T);
+double SuperHeatedRouT(double P, double T);
+double SuperHeatedTH(double P, double h);
+double SuperHeatedCpT(double P, double h);
+
+double SubCooledHT(double P, double T);
+double SubCooledTH(double P, double h);
+double SubCooledRouT(double P, double T);
+double SubCooledCpT(double P, double T);
+
+/**Calculate the Evaporative Heat Transfer Amount**/
+double Update_HrC(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf);
+/**Calculate the Evaporative Heat Transfer Amount**/
+double Update_HrH(double ThPtpr[], double Tr, double pr, double xr, double mr, double Tf);
+/**Calculate the Convective Heat Transfer Coefficient**/
+double Update_Hr(double Tf, double Tr, double mr, double cpr, double kr, double ur);
+double Update_Frict_Gronner(double ThPtpr[], double Tr, double xr, double rour, double wr);
+double Update_Frict_Fanning(double rour, double wr, double ur);
+double Refrigerant(int i, double Tf, double p1, double c1, double c2, double c3, double pr_temp, double pr_BFR, double mr_temp, double qr_BCK, double ThPtpr[], double Result[]);
+
+double Air_Humidity(double Yain_BFR, double Yaout_BFR, double Yain_NOW, double ky_BFR, double ky_NOW, double Yd_BFR, double Yd_NOW);
+double DCHE_Temp(double Tf_BFR, double Tf_FRT, double Tf_BCK, double Wd_avg_temp, double Wd_avg_BFR, double Yd_NOW, double qst_NOW, double Ta_NOW, double Ya_NOW, double ky_NOW, double Tr_NOW, double hr_NOW);
+double Air_Temperature(double Tain_BFR, double Taout_BFR, double Tain_NOW, double Ya_BFR, double Yain_NOW, double Yaout_NOW, double ky_NOW, double Yd_NOW, double Tf_BFR, double Tf_NOW);
+double Desiccant_Mass(bool flag_ch, int re, double Wd_BFR[], double Yd_temp, double Tf_BFR, double Tf_NOW, double Ya_NOW, double ky_NOW, double qst_BFR, double Wd[]);
+
+double ConvertYd (bool flag_ch, int re, double Tf, double Wd);
+double UpdateQst(double Tf, double Wd);
+double UpdateKy(double Ta);
+double UpdateHa();
+
+/*******************************************************************************************************************************/
+
+int main(){
+
+    cout<<"Coating Amount:"<<Md<<endl;
+    cout<<La<<'\t'<<Aa<<'\t'<<Aa * nf * ntx * ntz<<'\t'<<Ar<<'\t'<<Ar * nf * ntx * ntz<<endl;
+
+    /**输出文件定义**/
+    ofstream outfileTain;
+    ofstream outfileTaout;
+    ofstream outfileTa, outfileTa0;
+    ofstream outfileYain;
+    ofstream outfileYaout;
+    ofstream outfileYa, outfileYa0;
+    ofstream outfileTf;
+    ofstream outfileWd_avg;
+    ofstream outfileYd;
+    ofstream outfileWd;
+
+    outfileTain.open("1-Tain.txt");
+    outfileTaout.open("1-Taout.txt");
+    outfileTa.open("1-Ta.txt");
+    outfileTa0.open("1-Ta_Scaled.txt");
+    outfileYain.open("2-Yain.txt");
+    outfileYaout.open("2-Yaout.txt");
+    outfileYa.open("2-Ya.txt");
+    outfileYa0.open("2-Ya_Scaled.txt");
+    outfileTf.open("3-Tf.txt");
+    outfileWd_avg.open("3-Wd_avg.txt");
+    outfileYd.open("3-Yd.txt");
+    outfileWd.open("3-Wd.txt");
+
+    ofstream outfilePr;
+    ofstream outfileXr;
+    ofstream outfileTr;
+    ofstream outfileHr;
+    ofstream outfileHr0;
+    ofstream outfileMr;
+    ofstream outfileIr;
+    ofstream outfileRour;
+    ofstream outfileOTH;
+    ofstream outfileHS, outfileHA;
+
+    outfilePr.open("4-pr.txt");
+    outfileXr.open("4-xr.txt");
+    outfileTr.open("4-Tr.txt");
+    outfileHr.open("4-hr.txt");
+    outfileMr.open("4-mr.txt");
+    outfileIr.open("4-ir.txt");
+    outfileRour.open("4-rour.txt");
+    outfileHS.open("5-HS.txt");
+    outfileHA.open("5-HA.txt");
+    outfileOTH.open("5-summary.txt");
+
+    ifstream infile("0-Input.txt");
+    double t_simulation, Tain, Yain, mrin, Prin, Trin_CD;
+
+    ifstream infile1("0-Isotherm.txt");
+    int p;
+
+
+    for(p = 0; p <= 26; p++){
+        infile1>>Wda[p]>>RHa[p];
+        if(p <= 12)infile1>>Wdd[p]>>RHd[p];
+    }
+
+
+    /**变量定义**/
+    int i, j, k, re;
+    int i0, j0;
+
+    double Yain_BFR, Yaout_BFR, Ya_BFR;
+    double Yain_NOW, Yaout_NOW, Ya_NOW;
+    double Tain_BFR, Taout_BFR, Ta_BFR;
+    double Tain_NOW, Taout_NOW, Ta_NOW, Ta_temp;
+    double ky_BFR, ky_NOW;
+
+    double Taverage;
+    double Yaverage;
+
+    double Tf_BFR, Tf_FRT_BFR, Tf_BCK_BFR, Tf_NOW,Tf_temp;
+    double Wd_BFR[nn + 1], Wd_BFR_2[nn + 1], Wd_NOW[nn + 1];
+    double Wd_avg_BFR, Wd_avg_temp , Wd_avg_NOW;
+    double Yd_BFR, Yd_BFR_2, Yd_NOW;
+    double qst_BFR, qst_BFR_2, qst_NOW;
+
+    double Tf_average, Wd_average, Yd_average;
+
+    double c1,c2,c3,p1;
+    double pr, pr_BFR, pr_BCK, pr_2BCK;
+    double ir, ir_BFR, ir_BCK, ir_2BCK;
+    double rour, rour_BFR, rour_BCK, rour_2BCK;
+    double wr, wr_BFR, wr_BCK, wr_2BCK;
+    double momr, momr_BCK, momr_2BCK;
+    double frict, qr, qr_BCK;
+    double Tr, Tr_BFR, hr, hr_BFR;
+    double xr, epir,cp;
+    double TrL, TrG, iL, iG;
+    double rouL, rouG, thL;
+    double ThPtpr[11];
+    double Result[10];
+    double mr[6] = {0,0,0,0,0,0};
+
+    int condition;
+    bool flag_pr, flag_ir;
+    int times_pr, times_ir;
+
+    bool flag_Tf, flag_Ta, flag_wd;
+    int times_Tf, times_Ta, times_wd;
+
+    /**重要参数微元矩阵**/
+    double MTaout_BFR[cycle_XYZ + 1], MTain_BFR[cycle_XYZ + 1], MTain[cycle_XYZ + 1];
+    double MYaout_BFR[cycle_XYZ + 1], MYain_BFR[cycle_XYZ + 1], MYain[cycle_XYZ + 1];
+    double MTf_BFR[cycle_XYZ + 1], MTf[cycle_XYZ + 1];
+    double MWd_BFR[cycle_XYZ + 1][nn + 1];
+
+    double MPr_BFR[cycle_XYZ + 1], MIr_BFR[cycle_XYZ + 1], MRour_BFR[cycle_XYZ + 1], MWr_BFR[cycle_XYZ + 1];
+    double MTr_BFR[cycle_XYZ + 1], MHr_BFR[cycle_XYZ + 1];
+
+    int r0;
+    double Q, Q_total;
+    double h_average;
+    double Tain_SEG, Taout_SEG, Yain_SEG, Yaout_SEG;
+    double dlT_SEG;
+    double QS_SEG, QA_SEG;
+    double hS_SEG, hA_SEG;
+
+
+    infile>>t_simulation>>Tain>>Yain>>mrin>>Prin>>Trin_CD;
+
+
+    /**赋初值（非制冷剂侧）**/
+    if (!flag_cycle) Wd0 = 0.10;
+    else Wd0 = 0.30;
+
+    for(i0 = 0; i0 <= cycle_XYZ; i0++) {
+        MTain_BFR[i0] = Tain, MTaout_BFR[i0] = Tain;
+        MTain[i0] = Tain;
+        MYain_BFR[i0] = Yain, MYaout_BFR[i0] = Yain;
+        MYain[i0] = Yain;
+        MTf[i0] = MTf_BFR[i0] = Tain;
+        for(j0 = 0; j0 < nn + 1; j0++)MWd_BFR[i0][j0] = Wd0;
+    }
+
+    /**每间隔1单位时间步长进行的计算**/
+    for(j = 1; j <= cycle_T * (cycle_Tc + cycle_Th); j++){
+
+        if (j != 1)infile>>t_simulation>>Tain>>Yain>>mrin>>Prin>>Trin_CD;
+        //if (Trin_CD > 80)Trin_CD = 80;
+
+
+        re = j % (cycle_Tc + cycle_Th);
+
+        if((re == 1 && (!flag_cycle))||(re == cycle_Tc + 1 && (flag_cycle))){
+
+            ua = 1;
+            ha = UpdateHa();
+            //ha = 56;
+            cout<<j<<'\t'<<ha<<endl;
+        }
+
+        if((re == cycle_Th + 1 && (!flag_cycle))||(re == 1 && (flag_cycle))){
+            ua = 1;
+            ha = UpdateHa();
+            //ha = 56;
+            cout<<j<<'\t'<<ha<<endl;
+        }
+
+        /**蒸发器冷凝器切换时，切换进出口(非制冷剂侧)**/
+        if ((re == 1 && j != 1) || ((re == cycle_Tc + 1) && (!flag_cycle))||((re == cycle_Th + 1) && (flag_cycle))){
+
+            //for(i0 = 1; i0 <= cycle_XYZ; i0++)MTf[i0] = MWr_BFR[cycle_XYZ + 1 - i0];
+            //for(i0 = 1; i0 <= cycle_XYZ; i0++)MWr_BFR[i0] = mrin / MRour_BFR[i0];
+            //for(i0 = 1; i0 <= cycle_XYZ; i0++)MWr_BFR[i0] = MTf[i0];
+
+            //for(i0 = 1; i0 <= cycle_XYZ; i0++)MTf[i0] = MTr_BFR[cycle_XYZ + 1 - i0];
+            //for(i0 = 1; i0 <= cycle_XYZ; i0++)MTr_BFR[i0] = MTf[i0];
+            //for(i0 = 1; i0 <= cycle_XYZ; i0++)MTf[i0] = MHr_BFR[cycle_XYZ + 1 - i0];
+            //for(i0 = 1; i0 <= cycle_XYZ; i0++)MHr_BFR[i0] = MTf[i0];
+
+            for(i0 = 1; i0 <= cycle_XYZ; i0++)MTf[i0] = MYain_BFR[cycle_XYZ + 1 - i0];
+            for(i0 = 1; i0 <= cycle_XYZ; i0++)MYain_BFR[i0] = MTf[i0];
+            for(i0 = 1; i0 <= cycle_XYZ; i0++)MTf[i0] = MYaout_BFR[cycle_XYZ + 1 - i0];
+            for(i0 = 1; i0 <= cycle_XYZ; i0++)MYaout_BFR[i0] = MTf[i0];
+            for(i0 = 1; i0 <= cycle_XYZ; i0++)MTf[i0] = MTain_BFR[cycle_XYZ + 1 - i0];
+            for(i0 = 1; i0 <= cycle_XYZ; i0++)MTain_BFR[i0] = MTf[i0];
+            for(i0 = 1; i0 <= cycle_XYZ; i0++)MTf[i0] = MTaout_BFR[cycle_XYZ + 1 - i0];
+            for(i0 = 1; i0 <= cycle_XYZ; i0++)MTaout_BFR[i0] = MTf[i0];
+
+            for(i0 = 1; i0 <= cycle_XYZ; i0++){
+                MTf[i0] = MTf_BFR[cycle_XYZ + 1 - i0];
+                if (MTf[i0] >= 70) MTf[i0] = 70;
+            }
+            for(i0 = 1; i0 <= cycle_XYZ; i0++)MTf_BFR[i0] = MTf[i0];
+            for(j0 = 0; j0 < nn + 1; j0++){
+                for(i0 = 1; i0 <= cycle_XYZ; i0++)MTf[i0] = MWd_BFR[cycle_XYZ + 1 - i0][j0];
+                for(i0 = 1; i0 <= cycle_XYZ; i0++)MWd_BFR[i0][j0] = MTf[i0];
+            }
+        }
+
+
+        /**蒸发冷凝器切换时，初始化制冷剂侧流量**/
+        if(((re == 1 || re == cycle_Tc + 1) && (!flag_cycle))||((re == 1 || re == cycle_Th + 1) && (flag_cycle))){
+
+            for(i0 = 0; i0 <= cycle_XYZ; i0++) {
+
+                if (i0 >= 2)momr_2BCK = momr_BCK;
+                if (i0) momr_BCK = momr;
+
+                if (i0) MPr_BFR[i0] = MPr_BFR[i0 - 1];
+                else MPr_BFR[i0] = Prin;
+
+                flag_pr = 1;
+                times_pr = 1;
+                while (flag_pr){
+
+                    TrL = SaturatedLTP(MPr_BFR[i0]) - 273.15, TrG = SaturatedGTP(MPr_BFR[i0]) - 273.15;
+                    iL = 1000 * SaturatedLHT(TrL), iG = 1000 * SaturatedGHT(TrG);
+
+                    /**已知压力，迭代制冷剂焓值**/
+                    if (i0) MIr_BFR[i0] =  MIr_BFR[i0 - 1];
+                    else MIr_BFR[i0] = ((re == 1 && (!flag_cycle))||(re == cycle_Th + 1 && (flag_cycle))) ? 1000 * TwoPhaseHX(xrc0,MPr_BFR[i0]) : 1000 * SuperHeatedHT(MPr_BFR[i0], Trin_CD);
+                    flag_ir = 1;
+                    times_ir = 1;
+                    while(flag_ir){
+
+                        if(iL <= MIr_BFR[i0] && MIr_BFR[i0] <= iG){
+                            condition = 1;
+                            MTr_BFR[i0] = TwoPhaseTH(MIr_BFR[i0],MPr_BFR[i0]) - 273.15;
+                            xr = TwoPhaseXH(MIr_BFR[i0],MPr_BFR[i0]);
+                            ThPtpr[0] = rouL = SaturatedLRouT(MTr_BFR[i0]);
+                            ThPtpr[1] = rouG = SaturatedGRouT(MTr_BFR[i0]);
+                            ThPtpr[2] = 1000 * SaturatedLHT(MTr_BFR[i0]);
+                            ThPtpr[3] = 1000 * SaturatedGHT(MTr_BFR[i0]);
+                            ThPtpr[4] = 1000 * SaturatedLCpT(MTr_BFR[i0]);
+                            ThPtpr[5] = 1000 * SaturatedGCpT(MTr_BFR[i0]);
+                            ThPtpr[6] = SaturatedLKT(MTr_BFR[i0]);
+                            ThPtpr[7] = SaturatedGKT(MTr_BFR[i0]);
+                            ThPtpr[8] = SaturatedLUT(MTr_BFR[i0]);
+                            ThPtpr[9] = SaturatedGUT(MTr_BFR[i0]);
+                            ThPtpr[10] = thL = SaturatedLThT(MTr_BFR[i0]);
+                            if(MTr_BFR[i0] <= MTf_BFR[i0])MHr_BFR[i0] = Update_HrC(ThPtpr,MTr_BFR[i0],MPr_BFR[i0],xr,mrin,MTf_BFR[i0]);
+                            else MHr_BFR[i0] = Update_HrH(ThPtpr,MTr_BFR[i0],MPr_BFR[i0],xr,mrin,MTf_BFR[i0]);
+                        }
+                        else{
+                            if (MIr_BFR[i0] >= iG){
+                                condition = 2;
+                                MTr_BFR[i0] = SuperHeatedTH(MPr_BFR[i0],MIr_BFR[i0]) - 273.15;
+                                epir = xr = 1;
+                                cp = SuperHeatedCpT(MPr_BFR[i0], MTr_BFR[i0]);
+                                MHr_BFR[i0] = Update_Hr(MTf_BFR[i0],MTr_BFR[i0],mrin,cp,SaturatedGKT(MTr_BFR[i0]),SaturatedGUT(MTr_BFR[i0]));
+                            }
+                            else {
+                                condition = 3;
+                                MTr_BFR[i0] = SubCooledTH(MPr_BFR[i0],MIr_BFR[i0]) - 273.15;
+                                epir = xr = 0;
+                                cp = SubCooledCpT(MPr_BFR[i0], MTr_BFR[i0]);
+                                MHr_BFR[i0] = Update_Hr(MTf_BFR[i0],MTr_BFR[i0],mrin,cp,SaturatedLKT(MTr_BFR[i0]),SaturatedLUT(MTr_BFR[i0]));
+                            }
+                        }
+                        qr = MHr_BFR[i0] * (MTf_BFR[i0] - MTr_BFR[i0]) * 2 / Ri;
+                        //qr = 0;
+
+                        switch (i0){
+                        case 0:
+                            ir = ((re == 1 && (!flag_cycle))||(re == cycle_Th + 1 && (flag_cycle))) ? 1000 * TwoPhaseHX(xrc0,MPr_BFR[i0]) : 1000 * SuperHeatedHT(MPr_BFR[i0], Trin_CD);
+                            break;
+                        case 1:
+                            ir = (qr * (dy / 2) + (mrin * MIr_BFR[i0 - 1])) / mrin;
+                            break;
+                        case 2:
+                           ir = (qr * (dy * 3) + 9 * (mrin * MIr_BFR[i0 - 1]) - 4 * (mrin * MIr_BFR[i0 - 2])) / 5 / mrin;
+                            break;
+                        default:
+                            ir = (qr * (dy * 2) + 4 * (mrin * MIr_BFR[i0 - 1]) - (mrin * MIr_BFR[i0 - 2])) / 3 / mrin;
+                            break;
+                        }
+
+                        flag_ir = (fabs(ir - MIr_BFR[i0]) / ir < 1e-8)? 0 : 1;
+                        MIr_BFR[i0] = ir / 2 + MIr_BFR[i0]  / 2;
+                        times_ir++;
+                    }
+
+                    switch (condition) {
+                    case 1:
+                        epir = xr / ((1 + 0.12 * (1 - xr)) * (xr / rouG + (1 - xr) / rouL) + 1.18 * (1 - xr) * pow(g * thL * (rouL - rouG), 0.25) / pow(mrin,2) / pow(rouL,0.5)) / rouG;
+                        MRour_BFR[i0] = (1 - epir) * rouL + epir * rouG;
+                        //cout<<i0<<'\t'<<mrin<<endl;
+                        MWr_BFR[i0] = mrin / MRour_BFR[i0];
+                        momr = pow(mrin,2) * (pow(1 - xr,2) / rouL / (1 - epir) + pow(xr,2) / rouG / epir);
+                        frict = Update_Frict_Gronner(ThPtpr,MTr_BFR[i0],xr,MRour_BFR[i0],MWr_BFR[i0]);
+                        //MFrict_BFR[i0] = 0;
+                        break;
+                    case 2:
+                        MRour_BFR[i0] = SuperHeatedRouT(MPr_BFR[i0], MTr_BFR[i0]);
+                        MWr_BFR[i0] = mrin / MRour_BFR[i0];
+                        momr = pow(mrin,2) / MRour_BFR[i0];
+                        frict = Update_Frict_Fanning(MRour_BFR[i0],MWr_BFR[i0],SaturatedGUT(MTr_BFR[i0]));
+                        break;
+                    case 3:
+                        MRour_BFR[i0] = SubCooledRouT(MPr_BFR[i0], MTr_BFR[i0]);
+                        MWr_BFR[i0] = mrin / MRour_BFR[i0];
+                        momr = pow(mrin,2) / MRour_BFR[i0];
+                        frict = Update_Frict_Fanning(MRour_BFR[i0],MWr_BFR[i0],SaturatedLUT(MTr_BFR[i0]));
+                        break;
+                    }
+
+                    switch (i0){
+                    case 0:
+                        pr = Prin;
+                        break;
+                    case 1:
+                        pr = - frict * (dy / 2) + (MPr_BFR[i0 - 1] + momr_BCK) - momr;
+                        break;
+                    case 2:
+                        pr = (- frict * (dy * 3) + 9 * (MPr_BFR[i0 - 1] + momr_BCK) - 4 * (MPr_BFR[i0 - 2] + momr_2BCK)) / 5 - momr;
+                        break;
+                    default:
+                        pr = (- frict * (dy * 2) + 4 * (MPr_BFR[i0 - 1] + momr_BCK) - (MPr_BFR[i0 - 2] + momr_2BCK)) / 3 - momr;
+                        break;
+                    }
+                    flag_pr = (fabs(pr - MPr_BFR[i0]) / pr < 1e-12) ? 0 : 1;
+                    MPr_BFR[i0] = pr;
+                    times_pr++;
+                 }
+
+                outfilePr<<MPr_BFR[i0]<<'('<<i0<<')'<<'\t';
+                if(i0 % ny == 0)outfilePr<<endl;
+                outfileXr<<xr<<'('<<i0<<'\t'<<epir<<')'<<'\t';
+                if(i0 % ny == 0)outfileXr<<endl;
+                outfileTr<<MTr_BFR[i0]<<'('<<i0<<'\t'<<MIr_BFR[i0]<<')'<<'\t';
+                if(i0 % ny == 0)outfileTr<<endl;
+                outfileHr<<MHr_BFR[i0]<<'('<<i0<<')'<<'\t';
+                if(i0 % ny == 0)outfileHr<<endl;
+                outfileMr<<MRour_BFR[i0] * MWr_BFR[i0]<<'('<<i0<<')'<<'\t';
+                if(i0 % ny == 0)outfileMr<<endl;
+                outfileIr<<MIr_BFR[i0]<<'('<<i0<<')'<<'\t';
+                if(i0 % ny == 0)outfileIr<<endl;
+                outfileRour<<MRour_BFR[i0]<<'('<<i0<<'\t'<<MWr_BFR[i0]<<')'<<'\t';
+                if(i0 % ny == 0)outfileRour<<endl;
+            }
+        }
+
+         /**定义输出变量**/
+        Q_total = 0;
+        h_average = 0;
+        Taverage = 0;
+        Yaverage = 0;
+
+
+        cout<<j<<endl;
+
+        outfileTain<<endl<<j<<endl;
+        outfileTaout<<endl<<j<<endl;
+        outfileYain<<endl<<j<<endl;
+        outfileYaout<<endl<<j<<endl;
+        outfileTf<<endl<<j<<endl;;
+        outfileWd_avg<<endl<<j<<endl;
+        outfileYd<<endl<<j<<endl;
+        outfileWd<<endl<<j<<endl;
+
+        outfilePr<<endl<<j<<endl;
+        outfileXr<<endl<<j<<endl;
+        outfileTr<<endl<<j<<endl;
+        outfileHr<<endl<<j<<endl;
+        outfileMr<<endl<<j<<endl;
+        outfileIr<<endl<<j<<endl;
+        outfileRour<<endl<<j<<endl;
+
+
+        /**边界条件**/
+        for(i0 = 1; i0 <= cycle_XYZ; i0++) if ( (i0 % (4 * ny) - 1) / ny == 0) MTain[i0] = Tain, MYain[i0] = Yain;
+
+
+        if((( re <= cycle_Tc && re != 0) && (!flag_cycle))||((re > cycle_Th || re == 0) && (flag_cycle))){
+
+            MPr_BFR[0] = Prin;
+            //cout<<'\t'<<prc0;
+            xr = xrc0;
+            MIr_BFR[0] = 1000 * TwoPhaseHX(xr,MPr_BFR[0]);
+            MTr_BFR[0] = TwoPhaseTH(MIr_BFR[0],MPr_BFR[0]) - 273.15;
+            ThPtpr[0] = rouL = SaturatedLRouT(MTr_BFR[0]);
+            ThPtpr[1] = rouG = SaturatedGRouT(MTr_BFR[0]);
+            ThPtpr[2] = 1000 * SaturatedLHT(MTr_BFR[0]);
+            ThPtpr[3] = 1000 * SaturatedGHT(MTr_BFR[0]);
+            ThPtpr[4] = 1000 * SaturatedLCpT(MTr_BFR[0]);
+            ThPtpr[5] = 1000 * SaturatedGCpT(MTr_BFR[0]);
+            ThPtpr[6] = SaturatedLKT(MTr_BFR[0]);
+            ThPtpr[7] = SaturatedGKT(MTr_BFR[0]);
+            ThPtpr[8] = SaturatedLUT(MTr_BFR[0]);
+            ThPtpr[9] = SaturatedGUT(MTr_BFR[0]);
+            ThPtpr[10] = thL = SaturatedLThT(MTr_BFR[0]);
+            epir = xr / ((1 + 0.12 * (1 - xr)) * (xr / rouG + (1 - xr) / rouL) + 1.18 * (1 - xr) * pow(g * thL * (rouL - rouG), 0.25) / pow(mrin,2) / pow(rouL,0.5)) / rouG;
+            MRour_BFR[0] = (1 - epir) * rouL + epir * rouG;
+            cout<<MRour_BFR[0]<<endl;
+            MWr_BFR[0] = mrin / MRour_BFR[0];
+            momr =  pow(mrin,2) * (pow(1 - xr,2) / rouL / (1 - epir) + pow(xr,2) / rouG / epir);
+            MHr_BFR[0] = Update_HrC(ThPtpr,MTr_BFR[0],MPr_BFR[0],xr,mrin,MTf_BFR[0]);
+        }
+        else{
+            MPr_BFR[0] = Prin;
+            MTr_BFR[0] = Trin_CD;
+            epir = xr = 1;
+            MIr_BFR[0] = 1000 * SuperHeatedHT(MPr_BFR[0], MTr_BFR[0]);
+            MRour_BFR[0] = SuperHeatedRouT(MPr_BFR[0], MTr_BFR[0]);
+            MWr_BFR[0] = mrin/ MRour_BFR[0];
+            momr = pow(mrin,2) / MRour_BFR[0];
+            cp = SuperHeatedCpT(MPr_BFR[0], MTr_BFR[0]);
+            MHr_BFR[0] = Update_Hr(MTf_BFR[0],MTr_BFR[0],mrin,cp,SaturatedGKT(MTr_BFR[0]),SaturatedGUT(MTr_BFR[0]));
+        }
+
+        qr = MHr_BFR[0] * (MTf_BFR[0] - MTr_BFR[0]) * 2 / Ri;
+        pr_BCK = MPr_BFR[0];
+        ir_BCK = MIr_BFR[0];
+        rour_BCK = MRour_BFR[0];
+        wr_BCK = MWr_BFR[0];
+        momr_BCK = momr;
+        qr_BCK = qr;
+
+        outfilePr<<MPr_BFR[0]<<'('<<'0'<<')'<<endl;
+        outfileXr<<xr<<'('<<'0'<<'\t'<<epir<<')'<<endl;
+        outfileTr<<MTr_BFR[0]<<'('<<'0'<<'\t'<<MIr_BFR[0]<<')'<<endl;
+        outfileHr<<MHr_BFR[0]<<'('<<'0'<<')'<<endl;
+        outfileMr<<MRour_BFR[0] * MWr_BFR[0]<<'('<<'0'<<')'<<endl;
+        outfileIr<<MIr_BFR[0]<<'('<<'0'<<')'<<endl;
+        outfileRour<<MRour_BFR[0]<<'('<<'0'<<'\t'<<MWr_BFR[0]<<')'<<endl;
+
+        /**每个微元内进行的计算**/
+        for(i = 1; i <= cycle_XYZ; i++){
+
+            /**输入前一个时间节点或位置节点的值**/
+            if(i != 1){
+                pr_2BCK = pr_BCK, pr_BCK = pr;
+                ir_2BCK = ir_BCK, ir_BCK = ir;
+                rour_2BCK = rour_BCK, rour_BCK = rour;
+                wr_2BCK = wr_BCK, wr_BCK = wr;
+                momr_2BCK = momr_BCK, momr_BCK = momr;
+                qr_BCK = qr;
+            }
+
+            pr_BFR = MPr_BFR[i];
+            ir_BFR = MIr_BFR[i];
+            rour_BFR = MRour_BFR[i];
+            wr_BFR = MWr_BFR[i];
+            Tr_BFR = MTr_BFR[i];
+            hr_BFR = MHr_BFR[i];
+
+            Yain_BFR = MYain_BFR[i];
+            Yaout_BFR = MYaout_BFR[i];
+            Tain_BFR = MTain_BFR[i];
+            Taout_BFR = MTaout_BFR[i];
+
+            Tf_BFR = MTf_BFR[i];
+            if(i == 1)Tf_FRT_BFR = MTf_BFR[i], Tf_BCK_BFR = MTf_BFR[i + 1];
+            //if(i == 1)Tf_FRT_BFR = (4 * MTf_BFR[i] - MTf_BFR[i + 1]) / 3, Tf_BCK_BFR = MTf_BFR[i + 1];
+            else {
+                //if(i == cycle_XYZ)Tf_FRT_BFR = MTf_BFR[i - 1], Tf_BCK_BFR = (4 * MTf_BFR[i] - MTf_BFR[i - 1]) / 3;
+                if(i == cycle_XYZ)Tf_FRT_BFR = MTf_BFR[i - 1], Tf_BCK_BFR = MTf_BFR[i];
+                else Tf_FRT_BFR = MTf_BFR[i - 1], Tf_BCK_BFR = MTf_BFR[i + 1];
+            }
+            for(i0 = 0; i0 < nn + 1; i0++) Wd_BFR[i0] = MWd_BFR[i][i0];
+
+            Yain_NOW = MYain[i];
+            Tain_NOW = MTain[i];
+            Ya_BFR = Yain_BFR / 2 + Yaout_BFR / 2;
+            Ta_BFR = Tain_BFR / 2 + Taout_BFR / 2;
+            ky_BFR = UpdateKy(Ta_BFR);
+
+            Wd_avg_BFR = 0;
+            for(i0 = 0;i0 < nn + 1;i0++){
+                if(i0 == 0 || i0 == nn)Wd_avg_BFR = Wd_avg_BFR + Wd_BFR[i0] / 2 / nn;
+                else Wd_avg_BFR = Wd_avg_BFR + Wd_BFR[i0] / nn;
+            }
+            Wd_avg_temp = Wd_avg_BFR;
+            Yd_NOW = Yd_BFR = ConvertYd(flag_cycle,re,Tf_BFR, Wd_BFR[nn]);
+            qst_NOW = qst_BFR = UpdateQst(Tf_BFR, Wd_avg_BFR);
+
+            switch (i){
+            case 1:
+                p1 = 2 * dlt / dy;
+                c1 = rour_BFR + p1 * (rour_BCK * wr_BCK);
+                c2 = rour_BFR * wr_BFR + p1 * (pr_BCK + momr_BCK);
+                c3 = rour_BFR * ir_BFR + p1 * (rour_BCK * wr_BCK * ir_BCK);
+                //cout<<i<<'\t'<<rour_BFR<<'\t'<<wr_BFR<<'\t'<<ir_BFR<<endl;
+                //cout<<i<<'\t'<<rour_BCK<<'\t'<<wr_BCK<<'\t'<<ir_BCK<<'\t'<<pr_BCK<<'\t'<<momr_BCK<<endl;
+                break;
+            case 2:
+                //p1 = dlt / dy / 2;
+                //c1 = rour_BFR + p1 * (rour_BCK * wr_BCK) - p1 * (rour_BFR * wr_BFR - rour_BCK_BFR * wr_BCK_BFR);
+                //c2 = rour_BFR * wr_BFR + p1 * (pr_BCK + momr_BCK) - p1 * ((pr_BFR + momr_BFR) - (pr_BCK_BFR + momr_BCK_BFR));
+                //c3 = rour_BFR * ir_BFR + p1 * (rour_BCK * wr_BCK * ir_BCK) - p1 * (rour_BFR * wr_BFR * ir_BFR - rour_BCK_BFR * wr_BCK_BFR * ir_BCK_BFR);
+                p1 = dlt / dy / 3;
+                c1 = rour_BFR + p1 * (9 * rour_BCK * wr_BCK - 4 * rour_2BCK * wr_2BCK);
+                c2 = rour_BFR * wr_BFR + p1 * (9 * (pr_BCK + momr_BCK) - 4 * (pr_2BCK + momr_2BCK));
+                c3 = rour_BFR * ir_BFR + p1 * (9 * rour_BCK * wr_BCK * ir_BCK - 4 * rour_2BCK * wr_2BCK * ir_2BCK);
+                //cout<<i<<'\t'<<rour_BFR<<'\t'<<wr_BFR<<'\t'<<ir_BFR<<endl;
+                //cout<<i<<'\t'<<rour_BCK<<'\t'<<wr_BCK<<'\t'<<ir_BCK<<'\t'<<pr_BCK<<'\t'<<momr_BCK<<endl;
+                //cout<<i<<'\t'<<rour_2BCK<<'\t'<<wr_2BCK<<'\t'<<ir_2BCK<<'\t'<<pr_2BCK<<'\t'<<momr_2BCK<<endl;
+                break;
+            case 3:
+                p1 = dlt / dy / 2;
+            default:
+                c1 = rour_BFR + p1 * (4 * rour_BCK * wr_BCK - rour_2BCK * wr_2BCK);
+                c2 = rour_BFR * wr_BFR + p1 * (4 * (pr_BCK + momr_BCK) - (pr_2BCK + momr_2BCK));
+                c3 = rour_BFR * ir_BFR + p1 * (4 * rour_BCK * wr_BCK * ir_BCK - rour_2BCK * wr_2BCK * ir_2BCK);
+                //cout<<i<<'\t'<<rour_BFR<<'\t'<<wr_BFR<<'\t'<<ir_BFR<<endl;
+                //cout<<i<<'\t'<<rour_BCK<<'\t'<<wr_BCK<<'\t'<<ir_BCK<<'\t'<<pr_BCK<<'\t'<<momr_BCK<<endl;
+                //cout<<i<<'\t'<<rour_2BCK<<'\t'<<wr_2BCK<<'\t'<<ir_2BCK<<'\t'<<pr_2BCK<<'\t'<<momr_2BCK<<endl;
+                break;
+            }
+
+            outfileTain<<Tain_NOW<<'('<<i<<')'<<'\t';
+            if(i % ny == 0)outfileTain<<endl;
+            outfileYain<<Yain_NOW<<'('<<i<<')'<<'\t';
+            if(i % ny == 0)outfileYain<<endl;
+
+            /**假设已知Wd_NOW[11]，故Yd_NOW, Wd_avg_temp可知**/
+            flag_wd = 1;
+            times_wd = 1;
+            while(flag_wd){
+                /**假设已知Ta_temp，故ky_NOW可知**/
+                Ta_temp = Tain_BFR / 2 + Taout_BFR / 2;
+                flag_Ta = 1;
+                times_Ta = 1;
+                while (flag_Ta){
+                    ky_NOW = UpdateKy(Ta_temp);
+                    Yaout_NOW = Air_Humidity(Yain_BFR,Yaout_BFR,Yain_NOW,ky_BFR,ky_NOW,Yd_BFR,Yd_NOW);
+                    Ya_NOW = Yain_NOW / 2 + Yaout_NOW / 2;
+                    //cout<<Ya_NOW<<endl;
+                    Tf_temp = Tf_BFR;
+                    flag_Tf = 1;
+                    times_Tf = 1;
+                    while (flag_Tf){
+                        hr = Refrigerant(i,Tf_temp,p1,c1,c2,c3,pr_BCK,pr_BFR,rour_BCK * wr_BCK,qr_BCK,ThPtpr,Result);
+                        Tr = Result[3];
+                        Tf_NOW = DCHE_Temp(Tf_BFR,Tf_FRT_BFR,Tf_BCK_BFR,Wd_avg_temp,Wd_avg_BFR,Yd_NOW,qst_NOW,Ta_temp,Ya_NOW,ky_NOW,Tr,hr);
+                        //cout<<i<<'\t'<<times_Tf<<'\t'<<hr<<'\t'<<Tr<<'\t'<<Tf_NOW<<endl;
+                        //cout<<Result[0]<<'\t'<<Result[2]<<endl;
+                        //cout<<i<<'\t'<<Tf_NOW<<'\t'<<Tf_temp<<'\t'<<hr<<'\t'<<Tr<<'\t'<<(Tf_NOW - Tf_temp) / Tf_NOW<<endl;
+                        flag_Tf = (fabs((Tf_NOW - Tf_temp) / Tf_NOW) < 1e-4) ? 0 : 1;
+                        //if(i==33)cout<<i<<'\t'<<Tf_NOW<<'\t'<<fabs(Tf_NOW - Tf_temp) / Tf_NOW<<endl;
+                        Tf_temp = Tf_NOW;
+                        times_Tf++;
+                    }
+                    Taout_NOW = Air_Temperature(Tain_BFR,Taout_BFR,Tain_NOW,Ya_BFR,Yain_NOW,Yaout_NOW,ky_NOW,Yd_NOW,Tf_BFR,Tf_NOW);
+                    Ta_NOW = Tain_NOW / 2 + Taout_NOW / 2;
+                    //cout<<times_Ta<<'\t'<<Ta_NOW<<endl;
+                    //cout<<i<<'\t'<<"Ta"<<'\t'<<Ta_NOW<<'\t'<<fabs(Ta_NOW - Ta_temp) / Ta_NOW<<endl;
+                    flag_Ta = ((fabs(Ta_NOW - Ta_temp) / Ta_NOW) < 1e-4) ? 0 : 1;
+                    Ta_temp = Ta_NOW;
+                    times_Ta++;
+                }
+                for(i0 = 0; i0 < nn + 1; i0++)Wd_BFR_2[i0] = Wd_BFR[i0];
+                Yd_BFR_2 = Yd_BFR;
+                qst_BFR_2 = qst_BFR;
+
+                for(k=0;k<dlt_ratio;k++){
+                    Wd_avg_NOW = Desiccant_Mass(flag_cycle,re,Wd_BFR_2,Yd_BFR_2,(Tf_NOW-Tf_BFR)*k/dlt_ratio+Tf_BFR,(Tf_NOW-Tf_BFR)*(k+1)/dlt_ratio+Tf_BFR,(Ya_NOW-Ya_BFR)*(k+1)/dlt_ratio+Ya_BFR,(ky_NOW-ky_BFR)*(k+1)/dlt_ratio+ky_BFR,qst_BFR_2,Wd_NOW);
+                    for(i0 = 0; i0 < nn + 1; i0++)Wd_BFR_2[i0] = Wd_NOW[i0];
+                    Yd_BFR_2 = ConvertYd(flag_cycle,re,(Tf_NOW-Tf_BFR)*(k+1)/dlt_ratio+Tf_BFR,Wd_NOW[nn]);
+                    qst_BFR_2 = UpdateQst((Tf_NOW-Tf_BFR)*(k+1)/dlt_ratio+Tf_BFR,Wd_avg_NOW);
+                    //cout<<i<<'\t'<<k<<'\t'<<Wd_avg_NOW<<endl;
+                }
+                Yd_NOW = Yd_BFR_2;
+                qst_NOW = qst_BFR_2;
+
+                flag_wd = (fabs(Wd_avg_NOW - Wd_avg_temp) / Wd_avg_NOW < 5e-5) ? 0 : 1;
+                //cout<<i<<'\t'<<"WD"<<'\t'<<times_wd<<'\t'<<Wd_avg_NOW<<'\t'<<Wd_avg_temp<<endl;
+                //if(times_wd >= 10)Wd_avg_temp = Wd_avg_NOW / 2 + Wd_avg_temp / 2;
+                Wd_avg_temp = Wd_avg_NOW;
+
+                times_wd++;
+            }
+
+            MYain_BFR[i] = Yain_NOW;
+            MYaout_BFR[i] = Yaout_NOW;
+            MTain_BFR[i] = Tain_NOW;
+            MTaout_BFR[i] = Taout_NOW;
+            MTf[i] = Tf_NOW;
+
+            //cout<<i<<'\t'<<Tf_NOW<<endl;
+            pr = Result[0];
+            ir = Result[1];
+            xr = Result[2];
+            Tr = Result[3];
+            epir = Result[4];
+            rour = Result[5] ;
+            wr = Result[6];
+            qr = Result[7];
+            momr = Result[8];
+            frict = Result[9];
+
+            MPr_BFR[i] = pr;
+            MIr_BFR[i] = ir;
+            MRour_BFR[i] = rour;
+            MWr_BFR[i] = wr;
+            MTr_BFR[i] = Tr;
+            MHr_BFR[i] = hr;
+
+            for(i0 = 0; i0 < nn + 1; i0++)MWd_BFR[i][i0] = Wd_NOW[i0];
+            if ( (i % (4 * ny) - 1) / ny == 0) MTain[i / (4 * ny) * 8 * ny + 2 * ny + 1 - i] = MTaout_BFR[i];
+            if ( (i % (4 * ny) - 1) / ny == 1) MTain[i / (4 * ny) * 8 * ny + 4 * ny + 1 - i] = MTaout_BFR[i];
+            if ( (i % (4 * ny) - 1) / ny == 2) MTain[i / (4 * ny) * 8 * ny + 6 * ny + 1 - i] = MTaout_BFR[i];
+            if ( (i % (4 * ny) - 1) / ny == 0) MYain[i / (4 * ny) * 8 * ny + 2 * ny + 1 - i] = MYaout_BFR[i];
+            if ( (i % (4 * ny) - 1) / ny == 1) MYain[i / (4 * ny) * 8 * ny + 4 * ny + 1 - i] = MYaout_BFR[i];
+            if ( (i % (4 * ny) - 1) / ny == 2) MYain[i / (4 * ny) * 8 * ny + 6 * ny + 1 - i] = MYaout_BFR[i];
+
+            Q = (Tf_NOW - Tf_BFR) * (roucu * epscu * ccu + roual * epsal * cal + roud * epsd * cd + roud * epsd * cpg * Wd_avg_NOW) * (Vcu + Val + Vd) * ny_multiple / 1000;
+            Q_total = Q_total + Q;
+            h_average = h_average + hr / ny / ntz / ntx;
+
+            outfileTaout<<Taout_NOW<<'('<<i<<')'<<'\t';
+            if(i % ny == 0)outfileTaout<<endl;
+            outfileYaout<<Yaout_NOW<<'('<<i<<'\t'<<ky_NOW<<')'<<'\t';
+            if(i % ny == 0)outfileYaout<<endl;
+
+            outfileTf<<Tf_NOW<<'('<<i<<'\t'<<Tf_BFR<<')'<<'\t';
+            if(i % ny == 0)outfileTf<<endl;
+            outfileWd_avg<<Wd_avg_NOW<<'('<<i<<'\t'<<Wd_avg_BFR<<'\t'<<ky_NOW<<')'<<'\t';
+            if(i % ny == 0)outfileWd_avg<<endl;
+            outfileYd<<Yd_NOW<<'('<<i<<')'<<'\t';
+            if(i % ny == 0)outfileYd<<endl;
+            if(i % ny == 1){
+                for(i0 = 0; i0 < nn + 1; i0++)outfileWd<<MWd_BFR[i][i0]<<'\t';
+                outfileWd<<endl;
+            }
+
+            if(i==1) outfileOTH<<endl<<j;
+            if ((re <= cycle_Tc && re != 0) && (!flag_cycle)){
+                if(i == ny * (ntx * 4 + 1)||i == ny * (ntx * 4 + 2)||i == ny * (ntx * 4 + 3)||i == ny * (ntx * 4 + 4)){
+                    Tf_average = 0;
+                    Wd_average = 0;
+                    for (i0 = 0; i0<ny; i0++){
+                        Tf_average = MTf[i-i0]/ny + Tf_average;
+                        Wd_average = MWd_BFR[i-i0][nn]/ny + Wd_average;
+                    }
+                    Yd_average = ConvertYd(flag_cycle,re,Tf_average,Wd_average);
+                    outfileOTH<<'\t'<<i<<'\t'<<Tf_average<<'\t'<<Yd_average / 1000;
+                }
+            }
+            else{
+                if(i == ny * (ntx * 6 + 1)||i == ny * (ntx * 6 + 2)||i == ny * (ntx * 6 + 3)||i == ny * (ntx * 6 + 4)){
+                    Tf_average = 0;
+                    Wd_average = 0;
+                    for (i0 = 0; i0<ny; i0++){
+                        Tf_average = MTf[i-i0]/ny + Tf_average;
+                        Wd_average = MWd_BFR[i-i0][nn]/ny + Wd_average;
+                    }
+                    Yd_average = ConvertYd(flag_cycle,re,Tf_average,Wd_average);
+                    outfileOTH<<'\t'<<i<<'\t'<<Tf_average<<'\t'<<Yd_average / 1000;
+                }
+            }
+            //else if((cycle_XYZ - i)%(ny*ntx*2)==0)outfileOTH<<'\t'<<i<<'\t'<<Tf_NOW<<'\t'<<Yd_NOW / 1000;
+
+            outfilePr<<pr<<'('<<i<<'\t'<<momr<<'\t'<<pr_BFR<<')'<<'\t';
+            if(i % ny == 0)outfilePr<<endl;
+            outfileXr<<xr<<'('<<i<<'\t'<<epir<<')'<<'\t';
+            if(i % ny == 0)outfileXr<<endl;
+            outfileTr<<Tr<<'('<<i<<'\t'<<Tr_BFR<<')'<<'\t';
+            if(i % ny == 0)outfileTr<<endl;
+            outfileHr<<hr<<'('<<i<<')'<<'\t';
+            if(i % ny == 0)outfileHr<<endl;
+            outfileMr<<rour * wr<<'('<<i<<'\t'<<wr<<'\t'<<wr_BFR<<')'<<'\t';
+            if(i % ny == 0)outfileMr<<endl;
+            outfileIr<<ir<<'('<<i<<'\t'<<ir_BFR<<')'<<'\t';
+            if(i % ny == 0)outfileIr<<endl;
+            outfileRour<<rour<<'('<<i<<'\t'<<rour_BFR<<')'<<'\t';
+            if(i % ny == 0)outfileRour<<endl;
+            //if((j - 1) % 30 == 0)outfileHr0<<i<<'\t'<<h_total<<'\t'<<h_sensible<<endl;
+        }
+
+        MTf[0] = 9 * MTf[1] / 8 - MTf[2] / 8;
+        for(i0 = 0; i0 <= cycle_XYZ; i0++)MTf_BFR[i0] = MTf[i0];
+
+        for(i0 = 1; i0 <= cycle_XYZ; i0++) {
+            if(((i0 - 1) / ny) % 4 == 3){
+                Taverage = Taverage + MTaout_BFR[i0] / ny / ntz;
+                Yaverage = Yaverage + MYaout_BFR[i0] / ny / ntz;
+            }
+        }
+
+
+
+
+         for (r0 = 1; r0 <= ntz; r0++){
+            Tain_SEG = 0;
+            Yain_SEG = 0;
+            Taout_SEG = 0;
+            Yaout_SEG = 0;
+            for (i0 = 1; i0 <= ny ; i0++){
+                Tain_SEG = MTain_BFR[ny * ntx * (r0 - 1) + i0] / ny + Tain_SEG;
+                Yain_SEG = MYain_BFR[ny * ntx * (r0 - 1) + i0] / ny + Yain_SEG;
+                Taout_SEG = MTaout_BFR[ny * ntx * r0 + 1 - i0] / ny + Taout_SEG;
+                Yaout_SEG = MYaout_BFR[ny * ntx * r0 + 1 - i0] / ny + Yaout_SEG;
+            }
+            dlT_SEG = (( Tain_SEG - MTr_BFR[ny * ntx * (r0 - 1)]) - (Taout_SEG - MTr_BFR[ny * ntx * r0]))/log((MTr_BFR[ny * ntx * (r0 - 1)] - Tain_SEG)/(MTr_BFR[ny * ntx * r0] - Taout_SEG));
+            QS_SEG = ua * roua * 0.32 * 0.3 * (Tain_SEG * (cpa + cpg * Yain_SEG / 1000) - Taout_SEG * (cpa + cpg * Yaout_SEG / 1000)) / ntz;
+            QA_SEG = ua * roua * 0.32 * 0.3 * (Yain_SEG - Yaout_SEG) * 2700 / ntz;
+            hS_SEG = QS_SEG / dlT_SEG / Aa / nf / ntx;
+            hA_SEG = QA_SEG / dlT_SEG / Aa / nf / ntx;
+            outfileHS<<hS_SEG<<'\t';
+            outfileHA<<hA_SEG<<'\t';
+        }
+
+        outfileHS<<endl;
+        outfileHA<<endl;
+
+        outfileTa<<j<<'\t'<<Taverage<<endl;
+        if( (j - 1) % 10 == 0)outfileTa0<<j<<'\t'<<Taverage<<endl;
+        outfileYa<<j<<'\t'<<Yaverage<<endl;
+        if( (j - 1) % 10 == 0)outfileYa0<<j<<'\t'<<Yaverage<<endl;
+        //if( (j - 1) % 50 == 0)outfileIrout<<j<<'\t'<<ir<<'\t'<<(1000 * SuperHeatedHT(1000 * SaturatedGPT(45), 80) - ir) * 400 * pi * pow(Ri,2)<<endl;
+        //outfileOTH<<j<<'\t'<<Q_total<<'\t'<<h_average<<endl;
+
+        if(!flag_cycle){
+             if (re <= cycle_Tc && re != 0){
+                mr[2 * ((j - 1) / (cycle_Tc + cycle_Th))] = mr[2 * ((j - 1)/  (cycle_Tc + cycle_Th))] + MRour_BFR[cycle_XYZ] * MWr_BFR[cycle_XYZ] / cycle_Tc;
+                cout<<2 * ((j - 1)/  (cycle_Tc + cycle_Th))<<endl;
+             }
+             else {
+                mr[2 * ((j - 1)/  (cycle_Tc + cycle_Th)) + 1] = mr[2 * ((j - 1) /  (cycle_Tc + cycle_Th)) + 1] + MRour_BFR[0] * MWr_BFR[0] / cycle_Th;
+                cout<<2 * ((j - 1)/  (cycle_Tc + cycle_Th)) + 1<<endl;
+             }
+        }
+
+        else{
+             if (re <= cycle_Th && re != 0){
+                mr[2 * ((j - 1)/  (cycle_Tc + cycle_Th))] = mr[2 * ((j - 1)/  (cycle_Tc + cycle_Th))] + MRour_BFR[0] * MWr_BFR[0] / cycle_Th;
+                cout<<2 * ((j - 1)/  (cycle_Tc + cycle_Th))<<endl;
+             }
+             else{
+                 mr[2 * ((j - 1)/  (cycle_Tc + cycle_Th)) + 1] = mr[2 * ((j - 1) /  (cycle_Tc + cycle_Th)) + 1] + MRour_BFR[cycle_XYZ] * MWr_BFR[cycle_XYZ] / cycle_Tc;
+                 cout<<2 * ((j - 1)/  (cycle_Tc + cycle_Th)) + 1<<endl;
+             }
+        }
+    }
+    cout<<mr[0]<<'\t'<<mr[1]<<'\t'<<mr[2]<<'\t'<<mr[3]<<'\t'<<mr[4]<<'\t'<<mr[5]<<endl;
+    outfileTain.close();
+    outfileTaout.close();
+    outfileTa.close();
+    outfileTa0.close();
+    outfileYain.close();
+    outfileYaout.close();
+    outfileYa.close();
+    outfileYa0.close();
+    outfileTf.close();
+    outfileWd_avg.close();
+    outfileYd.close();
+    outfileWd.close();
+
+    outfilePr.close();
+    outfileXr.close();
+    outfileTr.close();
+    outfileHr.close();
+    outfileMr.close();
+    outfileIr.close();
+    outfileRour.close();
+    outfileHS.close();
+    outfileHA.close();
+    outfileOTH.close();
+
+    return 0;
+}
+
+double Air_Humidity(double Yain_BFR, double Yaout_BFR, double Yain_NOW, double ky_BFR, double ky_NOW, double Yd_BFR, double Yd_NOW){
+    double Yaout_NOW;
+    double c1 = roua / dlt / 2, c2 = roua * ua / 2 / dx;
+    double c3_BFR = ky_BFR / 2 / La, c3_NOW = ky_NOW / 2 / La;
+    //Yaout_NOW = ( - c1 * (Yain_NOW - Yain_BFR - Yaout_BFR) - c2 * (Yaout_BFR - Yain_BFR - Yain_NOW) + c3_BFR * (Yd_BFR - Yain_BFR / 2 - Yaout_BFR / 2) + c3_NOW * (Yd_NOW - Yain_NOW / 2)) / (c1 + c2 + c3_NOW / 2);
+    //Yaout_NOW = ( - c1 * (Yain_NOW - Yain_BFR - Yaout_BFR) - 2 * c2 * (Yaout_BFR - Yain_BFR) + 2 * c3_BFR * (Yd_BFR - Yain_BFR / 2 - Yaout_BFR / 2)) / c1;
+    Yaout_NOW = ( - c1 * (Yain_NOW - Yain_BFR - Yaout_BFR) + 2 * c2 *  Yain_NOW + 2 * c3_NOW * (Yd_NOW - Yain_NOW / 2)) / (c1 + 2 * c2 + c3_NOW);
+    return Yaout_NOW;
+}
+
+double Air_Temperature(double Tain_BFR, double Taout_BFR, double Tain_NOW, double Ya_BFR, double Yain_NOW, double Yaout_NOW, double ky_NOW, double Yd_NOW, double Tf_BFR, double Tf_NOW){
+    double Taout_NOW;
+    double Ya_NOW = Yain_NOW / 2 + Yaout_NOW / 2;
+    double c1_BFR = roua * (cpa + Ya_BFR * cpg / 1000) / dlt / 2, c1_NOW = roua * (cpa + Ya_NOW * cpg / 1000) / dlt / 2;
+    double c2_IN = roua * ua * (cpa + Yain_NOW * cpg / 1000) / dx / 2, c2_OUT = roua * ua * (cpa + Yaout_NOW * cpg / 1000) / dx / 2;
+    double c3 = ha / 2 / La;
+    double c4 = ky_NOW * cpg * (Yd_NOW - Ya_NOW) / 1000 / 2 / La;
+    double Ts;
+    if(Yd_NOW <= Ya_NOW) Taout_NOW = (c1_BFR * (Tain_BFR + Taout_BFR) - c1_NOW * Tain_NOW + 2 * c2_IN * Tain_NOW + 2 * c3 * (Tf_NOW - Tain_NOW / 2) + c4 * Tain_NOW) / (c1_NOW + 2 * c2_OUT + c3 - c4);
+    else Taout_NOW = (c1_BFR * (Tain_BFR + Taout_BFR) - c1_NOW * Tain_NOW + 2 * c2_IN * Tain_NOW + 2 * c3 * (Tf_NOW - Tain_NOW / 2) + 2 * c4 * Tf_NOW) / (c1_NOW + 2 * c2_OUT + c3);
+    //Taout_NOW = (c1_BFR * (Tain_BFR + Taout_BFR) - c1_NOW * Tain_NOW - c2_BFR * (Taout_BFR - Tain_BFR) + c2_NOW * Tain_NOW + c3 * (Tf_BFR - Tain_BFR / 2 - Taout_BFR / 2 + Tf_NOW - Tain_NOW / 2)) / (c1_NOW + c2_NOW + c3 / 2);
+    //Taout_NOW = (c1_BFR * (Tain_BFR + Taout_BFR) - c1_NOW * Tain_NOW - 2 * c2_BFR * (Taout_BFR - Tain_BFR) + 2 * c3 * (Tf_BFR - Tain_BFR / 2 - Taout_BFR / 2)) / c1_NOW;
+    //Taout_NOW = (c1_BFR * (Tain_BFR + Taout_BFR) - c1_NOW * Tain_NOW + 2 * c2_IN * Tain_NOW + 2 * c3 * (Tf_NOW - Tain_NOW / 2)) / (c1_NOW + 2 * c2_OUT + c3);
+    return Taout_NOW;
+}
+
+double DCHE_Temp(double Tf_BFR, double Tf_FRT, double Tf_BCK, double Wd_avg_temp, double Wd_avg_BFR, double Yd_NOW, double qst_NOW, double Ta_NOW, double Ya_NOW, double ky_NOW, double Tr_NOW, double hr_NOW){
+
+    double Tf;
+
+    double c1 = roucu * epscu * ccu + roual * epsal * cal + roud * epsd * cd;
+    double c2_BFR = roud * epsd * cpg * Wd_avg_BFR, c2_NOW = roud * epsd * cpg * Wd_avg_temp;
+    double c3 = ha * dlt / LaHX, c4 = hr_NOW * dlt / LrHX;
+    double c5 = ky_NOW * dlt * (Ya_NOW - Yd_NOW) / 1000 / LaHX;
+    double c6 = epscu * lcu * dlt / dy / dy;
+    double ca, cf;
+
+    if(c5 >= 0) ca = c5 * cpg, cf = 0;
+    else cf = c5 * cpg, ca = 0;
+
+    Tf = ((c1 + c2_BFR - 2 * c6 ) * Tf_BFR + c6 * (Tf_FRT + Tf_BCK) + c5 * qst_NOW + (c3 + ca) * Ta_NOW + c4 * Tr_NOW) / (c1 + c2_NOW + c3 + c4 - cf);
+
+    return Tf;
+}
+
+double Desiccant_Mass(bool flag_ch, int re, double Wd_BFR[], double Yd_temp, double Tf_BFR, double Tf_NOW, double Ya_NOW, double ky_NOW, double qst_BFR, double Wd_NOW[]){
+
+    int i0, i1, i2, i3, i4;
+    int j, k;
+    double c0, c1_BFR, c1_NOW;
+    double **A = new double*[nn + 1];
+    for(i1 = 0;i1 < nn + 1;i1++)A[i1] = new double[nn + 1]();
+    double *B = new double[nn + 1]();
+
+    int times_yd = 1;
+    bool flag_yd = 1;
+    double Yd;
+    double qst = qst_BFR;
+    double Ds_BFR, Ds_NOW;
+    double Wd_avg;
+
+
+    Ds_BFR =  D0 * exp(-0.974e-6 * qst_BFR / (Tf_BFR + 273.15)) / 20;
+    c0 = dn / dlt_mass;
+    c1_BFR = Ds_BFR / dn / 2;
+
+    while (flag_yd){
+        Ds_NOW =  D0 * exp(-0.974e-6 * qst / (Tf_NOW + 273.15)) / 20;
+        c1_NOW = Ds_NOW / dn / 2;
+
+        A[0][0] = 3 * c1_NOW;
+        A[0][1] = - 4 * c1_NOW;
+        A[0][2] = c1_NOW;
+        B[0] = 0;
+
+        for(i2 = 1;i2 < nn;i2++){
+            A[i2][i2 - 1] = - c1_NOW;
+            A[i2][i2 + 1] = - c1_NOW;
+            A[i2][i2] = c0 + 2 * c1_NOW;
+            B[i2] = c1_BFR * Wd_BFR[i2 - 1] + c1_BFR * Wd_BFR[i2 + 1] + (c0 - 2 * c1_BFR) * Wd_BFR[i2];
+        }
+        A[nn][nn - 2] =  c1_NOW;
+        A[nn][nn - 1] = - 4 * c1_NOW;
+        A[nn][nn] = 3 * c1_NOW;
+        B[nn] = ky_NOW * (Ya_NOW - Yd_temp) / roud / 1000;
+
+        for(i3 = 1;i3 < nn;i3++){
+            A[i3][i3] = A[i3][i3] - A[i3 - 1][i3] * A[i3][i3 - 1] / A[i3 - 1][i3 - 1];
+            A[i3][i3 + 1] = A[i3][i3 + 1] - A[i3 - 1][i3 + 1] * A[i3][i3 - 1] / A[i3 - 1][i3 - 1];
+            B[i3]= B[i3] - B[i3 - 1] * A[i3][i3 - 1] / A[i3 - 1][i3 - 1];
+            A[i3][i3 - 1] = 0;
+        }
+
+        A[nn][nn - 1] = A[nn][nn - 1] - A[nn - 2][nn - 1] * A[nn][nn - 2] / A[nn - 2][nn - 2];
+        B[nn]= B[nn] - B[nn - 2] * A[nn][nn - 2] / A[nn - 2][nn - 2];
+        A[nn][nn - 2] = 0;
+        A[nn][nn] = A[nn][nn] - A[nn - 1][nn] * A[nn][nn - 1] / A[nn - 1][nn - 1];
+        B[nn]= B[nn] - B[nn - 1] * A[nn][nn - 1] / A[nn - 1][nn - 1];
+        A[nn][nn - 1] = 0;
+
+        Wd_NOW[nn] = B[nn] / A[nn][nn];
+        if(Wd_NOW[nn] >= Bd)Wd_NOW[nn] = Bd;
+        for(i4 = nn - 1;i4 >= 1;i4--){
+            Wd_NOW[i4] = (B[i4] - A[i4][i4 + 1] * Wd_NOW[i4 + 1]) / A[i4][i4];
+        }
+        Wd_NOW[0] = (B[0] - A[0][1] * Wd_NOW[1] -  A[0][2] * Wd_NOW[2]) / A[0][0];
+
+        Yd = ConvertYd(flag_ch, re, Tf_NOW, Wd_NOW[nn]);
+        flag_yd = (abs(Yd - Yd_temp)<1e-5) ? 0 : 1;
+        Yd_temp = Yd;
+
+        Wd_avg = 0;
+        for(i0 = 0;i0 < nn + 1;i0++){
+            if(i0 == 0 || i0 == nn)Wd_avg = Wd_avg + Wd_NOW[i0] / 2 / nn;
+            else Wd_avg = Wd_avg + Wd_NOW[i0] / nn;
+        }
+        qst = UpdateQst(Tf_NOW, Wd_avg);
+        times_yd++;
+    }
+
+    delete [] B;
+    for(i1 = 0;i1 < nn + 1;i1++) delete [] A[i1];
+    delete [] A;
+    return Wd_avg;
+}
+
+double ConvertYd (bool flag_ch, int re, double Tf, double Wd){
+
+    double Yd_SAT, Yd, Pvs, RH;
+
+    //Pvs = exp(-5800.2206 / (Tf + 273.15) + 1.3914993 - 0.048640239 * (Tf + 273.15) + 0.000041764768 * pow(Tf + 273.15,2) - 0.000000014452093 * pow(Tf + 273.15,3) + 6.5459673 * log(Tf + 273.15));
+    //Yd_SAT = 622  / (Patm / Pvs - 1);
+    //Yd = Wd / 0.24 * Yd_SAT;
+
+    int p;
+    //if((( re <= cycle_Tc && re != 0) && (!flag_cycle))||((re > cycle_Th || re == 0) && (flag_cycle))){
+
+
+        for(p = 0; p < 26; p++){
+            if(Wda[p] <= Wd && Wd <= Wda[p + 1])break;
+            //cout<<Wda[p]<<'\t'<<Wd<<endl;
+         }
+        if(p == 26){RH = 1;}
+        else RH = (Wd - Wda[p]) / (Wda[p + 1] - Wda[p]) * (RHa[p + 1] - RHa[p]) + RHa[p];
+    //}
+    //else{
+         //for(p = 0; p < 12; p++){
+            //if(Wdd[p] <= Wd && Wd <= Wdd[p + 1])break;
+            //cout<<Wda[p]<<'\t'<<Wd<<endl;
+         //}
+        //if(p == 12){RH = 1;}
+        //else RH = (Wd - Wdd[p]) / (Wdd[p + 1] - Wdd[p]) * (RHd[p + 1] - RHd[p]) + RHd[p];
+    //}
+    Pvs = exp(-5800.2206 / (Tf + 273.15) + 1.3914993 - 0.048640239 * (Tf + 273.15) + 0.000041764768 * pow(Tf + 273.15,2) - 0.000000014452093 * pow(Tf + 273.15,3) + 6.5459673 * log(Tf + 273.15));
+
+    Yd = 622 * RH / (Patm / Pvs - RH);
+    //cout<<p<<'\t'<<Yd<<"here!"<<endl;
+    return Yd;
+
+
+    //if(Wd >= 0.73431) RHd = 1;
+    //else {
+        //if(Wd >= 0.683 && Wd < 0.73431)RHd = 1 / exp(((Wd -0.68427) / -0.00139 + 36)/ (Tf + 273.15) / (8.314 / 18));
+        //else RHd = 1 / exp((pow(- log(Wd / Bd) / Cd, 1/Dd) + 36)/ (Tf + 273.15) / (8.314 / 18));
+    //}
+
+    //Pvs = exp(-5800.2206 / (Tf + 273.15) + 1.3914993 - 0.048640239 * (Tf + 273.15) + 0.000041764768 * pow(Tf + 273.15,2) - 0.000000014452093 * pow(Tf + 273.15,3) + 6.5459673 * log(Tf + 273.15));
+    //Yd = 622 * RHd / (Patm / Pvs - RHd);
+    //return Yd;
+}
+
+double UpdateQst(double Tf, double Wd){
+    double qst;
+    qst = 2700000;
+    //qst = hfg * (1.0 + 2.0843 * pow(e,-10.28 * Wd));
+    return qst;
+}
+
+double UpdateKy(double Ta){
+
+    double ky, Da;
+    double NUa, PRa, SCa, SHa;
+
+    Da = 2.302e-5 * pow( (Ta + 273.15) / 256,1.81) * 0.98e5 / Patm;
+
+    NUa = ha * Va / Aa / ka;
+    PRa = mua * cpa / ka;
+    SCa = mua / roua / Da;
+    SHa = NUa * pow(SCa, 1.0 / 3) / pow (PRa , 1.0 / 3);
+    ky = roua * SHa * Da * Aa / Va;
+    //ky = 0.036;
+    return ky;
+}
+
+double UpdateHa(){
+
+    double d1, d2;
+    double Ao, Afr;
+    double af, tht, Dh, dc;
+    double Umax, REa, PRa;
+    double c3, c4, c5, c6, j;
+    double ha;
+
+    d1 = dlz - 2 * Ro;
+    d2 = 2 * (pow(pow(dlz / 2, 2) + pow(dlx, 2), 0.5) - 2 * Ro);
+    if(d1 < d2) Ao = nf * Pf * (1 - (tf + 2 * td) / Pf) * ((ntz - 1) * d1 + d1);
+    else Ao = nf * Pf * (1 - (tf + 2 * td) / Pf) * ((ntz - 1) * d2 + d1);
+    Afr = nf * Pf * dlz * ntz;
+
+    af = Aa / Va;
+    tht = Ao / Afr;
+    Dh = 4 * tht / af;
+    dc = 2 * Ro + 2 * td + 2 * tf;
+
+    Umax = ua * Afr / Ao;
+    REa = roua * Umax * dc / mua;
+    PRa = mua * cpa / ka;                                                              /**普朗克常数：定义式**/
+
+    c3 = - 0.361 - 0.042 * ntx / log(REa) + 0.158 * log(ntx * pow(Pf / dc, 0.41));
+    c4 = - 1.224 - 0.076 * pow(dlx / Dh, 1.42) / log(REa);
+    c5 = - 0.083 + 0.058 * ntx / log(REa);
+    c6 = - 5.735 + 1.21 * log(REa / ntx);
+    j = 0.086 * pow(REa, c3) * pow(ntx, c4) * pow(Pf / dc, c5) * pow(Pf / Dh, c6) * pow(Pf / dlz, -0.93);
+
+    ha = j / pow(PRa, 2.0 / 3) * roua * Umax * cpa;
+
+    return ha;
+}
